@@ -49,12 +49,12 @@ export default function App() {
       {/* Top Header */}
       <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* Hamburger Button */}
+          {/* Hamburger Button with Blue Focus Ring */}
           <button
             type="button"
             onClick={() => setSidebarOpen((prev) => !prev)}
             aria-label="Toggle navigation menu"
-            className="p-2 rounded-md text-slate-700 hover:text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-pointer"
+            className="p-2 rounded-md text-slate-700 hover:text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-colors cursor-pointer"
           >
             <svg
               className="w-6 h-6"
@@ -71,7 +71,7 @@ export default function App() {
             <span className="text-lg font-bold tracking-tight text-slate-900">
               Packing Optimizer 3D
             </span>
-            <span className="hidden sm:inline-block ml-3 text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded">
+            <span className="hidden sm:inline-block ml-3 text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200/80 px-2.5 py-0.5 rounded">
               {currentPage.label}
             </span>
           </div>
@@ -102,7 +102,7 @@ export default function App() {
             type="button"
             onClick={() => setSidebarOpen(false)}
             aria-label="Close sidebar"
-            className="p-1.5 rounded-md text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer"
+            className="p-1.5 rounded-md text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <svg
               className="w-5 h-5"
@@ -116,7 +116,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Sidebar Menu Options */}
+        {/* Sidebar Menu Options - Blue/Teal Active Selection */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {NAV_ITEMS.map((item) => {
             const isActive = item.key === activePage
@@ -125,9 +125,9 @@ export default function App() {
                 key={item.key}
                 type="button"
                 onClick={() => handleSelectPage(item.key)}
-                className={`w-full text-left px-3.5 py-2.5 rounded-md text-sm font-medium transition-colors cursor-pointer flex items-center justify-between ${
+                className={`w-full text-left px-3.5 py-2.5 rounded-md text-sm font-medium active:scale-[0.99] transition-all duration-150 cursor-pointer flex items-center justify-between ${
                   isActive
-                    ? 'bg-slate-900 text-white'
+                    ? 'bg-sky-600 text-white font-semibold shadow-2xs'
                     : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -157,7 +157,7 @@ export default function App() {
             <ProductsView />
           ) : (
             <div className="max-w-2xl mx-auto my-12 bg-white border border-slate-200 rounded-lg p-8 sm:p-12 text-center shadow-xs">
-              <span className="inline-block px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-700 bg-slate-100 rounded-full mb-4">
+              <span className="inline-block px-3 py-1 text-xs font-semibold uppercase tracking-wider text-sky-700 bg-sky-50 border border-sky-200/70 rounded-full mb-4">
                 {currentPage.label}
               </span>
               <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3">

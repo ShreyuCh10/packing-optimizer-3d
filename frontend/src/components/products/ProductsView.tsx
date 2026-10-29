@@ -69,11 +69,12 @@ export default function ProductsView() {
           </p>
         </div>
 
+        {/* Primary Interactive Refresh Button */}
         <button
           type="button"
           onClick={loadProducts}
           disabled={loading}
-          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 hover:text-slate-900 transition cursor-pointer self-start sm:self-auto disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-sky-700 bg-sky-50/70 border border-sky-200 rounded-md hover:bg-sky-100 hover:text-sky-900 active:scale-[0.98] transition-all duration-150 cursor-pointer self-start sm:self-auto disabled:opacity-50 shadow-2xs"
         >
           <svg
             className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
@@ -94,7 +95,7 @@ export default function ProductsView() {
 
       {/* Search & Filter Toolbar */}
       <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-        {/* Search Bar */}
+        {/* Search Bar with Blue/Teal Focus Ring */}
         <div className="relative flex-1 max-w-md">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -106,13 +107,13 @@ export default function ProductsView() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by part name or material..."
-            className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-slate-300 rounded-md text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent transition"
+            className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-slate-300 rounded-md text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition duration-150"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -121,22 +122,25 @@ export default function ProductsView() {
           )}
         </div>
 
-        {/* Part Type Filter Pills */}
+        {/* Selected Filter Pills - Teal/Blue Primary Action */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 text-xs">
-          {availableTypes.slice(0, 7).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setSelectedType(t)}
-              className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition cursor-pointer ${
-                selectedType.toLowerCase() === t.toLowerCase()
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+          {availableTypes.slice(0, 7).map((t) => {
+            const isSelected = selectedType.toLowerCase() === t.toLowerCase()
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setSelectedType(t)}
+                className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap active:scale-[0.98] transition-all duration-150 cursor-pointer ${
+                  isSelected
+                    ? 'bg-sky-600 text-white shadow-2xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                {t}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -146,7 +150,7 @@ export default function ProductsView() {
           Showing <strong className="text-slate-800">{filteredProducts.length}</strong> of{' '}
           <strong className="text-slate-800">{products.length}</strong> products
         </span>
-        <span className="hidden sm:inline-block bg-slate-100 px-2.5 py-0.5 rounded text-[11px] font-mono text-slate-600">
+        <span className="hidden sm:inline-block bg-sky-50 text-sky-800 border border-sky-200/80 px-2.5 py-0.5 rounded text-[11px] font-mono">
           Source: SQLite (table: products)
         </span>
       </div>
@@ -159,7 +163,7 @@ export default function ProductsView() {
               key={idx}
               className="bg-white border border-slate-200 rounded-lg overflow-hidden animate-pulse flex flex-col"
             >
-              <div className="h-44 bg-slate-200" />
+              <div className="h-44 bg-sky-50/50" />
               <div className="p-4 space-y-3">
                 <div className="h-4 bg-slate-200 rounded w-3/4" />
                 <div className="h-3 bg-slate-200 rounded w-1/2" />
@@ -185,7 +189,7 @@ export default function ProductsView() {
           <button
             type="button"
             onClick={loadProducts}
-            className="px-3.5 py-1.5 bg-red-600 text-white rounded-md text-xs font-semibold hover:bg-red-700 transition cursor-pointer self-start sm:self-auto"
+            className="px-3.5 py-1.5 bg-sky-600 text-white rounded-md text-xs font-semibold hover:bg-sky-700 active:scale-[0.98] transition cursor-pointer self-start sm:self-auto shadow-xs"
           >
             Retry
           </button>
@@ -214,7 +218,7 @@ export default function ProductsView() {
               setSearchQuery('')
               setSelectedType('All')
             }}
-            className="px-3.5 py-2 bg-slate-900 text-white rounded-md text-xs font-semibold hover:bg-slate-800 transition cursor-pointer"
+            className="px-3.5 py-2 bg-sky-600 text-white rounded-md text-xs font-semibold hover:bg-sky-700 active:scale-[0.98] transition cursor-pointer shadow-xs"
           >
             Reset Filters
           </button>
@@ -242,4 +246,3 @@ export default function ProductsView() {
     </div>
   )
 }
-

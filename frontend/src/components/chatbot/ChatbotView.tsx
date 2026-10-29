@@ -103,8 +103,9 @@ export default function ChatbotView() {
           <span className="font-semibold text-slate-800 text-sm">
             Packing Assistant
           </span>
-          <span className="text-xs text-slate-400 font-normal">
-            &bull; Standalone Preview
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 bg-sky-50 border border-sky-200/80 px-2 py-0.5 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+            Standalone Preview
           </span>
         </div>
 
@@ -112,7 +113,7 @@ export default function ChatbotView() {
           <button
             type="button"
             onClick={handleNewChat}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-sky-700 hover:text-sky-900 rounded-lg hover:bg-sky-50 active:scale-[0.98] transition-all duration-150 cursor-pointer"
             title="Start new chat"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -128,8 +129,8 @@ export default function ChatbotView() {
         {messages.length === 0 ? (
           /* Empty / Welcome State (ChatGPT style) */
           <div className="h-full flex flex-col justify-center items-center max-w-2xl mx-auto text-center px-4">
-            <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-800 flex items-center justify-center font-bold text-lg mb-4">
-              <svg className="w-6 h-6 stroke-slate-800" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
+            <div className="w-12 h-12 rounded-full bg-sky-50 text-sky-700 border border-sky-200/80 flex items-center justify-center font-bold text-lg mb-4">
+              <svg className="w-6 h-6 stroke-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
               </svg>
             </div>
@@ -140,16 +141,16 @@ export default function ChatbotView() {
               Ask questions about custom box dimensions, padding rules, or evaluate candidate packages from inventory.
             </p>
 
-            {/* Prompt Suggestion Cards (2x2 grid) */}
+            {/* Prompt Suggestion Cards (2x2 grid) with Subtle Hover */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left">
               {QUICK_PROMPTS.map((item) => (
                 <button
                   key={item.title}
                   type="button"
                   onClick={() => handleSendMessage(item.prompt)}
-                  className="p-3.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition cursor-pointer text-left group"
+                  className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40 active:scale-[0.99] transition-all duration-150 cursor-pointer text-left group shadow-2xs"
                 >
-                  <div className="text-xs font-semibold text-slate-800 group-hover:text-slate-950">
+                  <div className="text-xs font-semibold text-slate-800 group-hover:text-sky-900 transition-colors">
                     {item.title}
                   </div>
                   <div className="text-xs text-slate-500 mt-1 line-clamp-1">
@@ -175,7 +176,7 @@ export default function ChatbotView() {
               ) : (
                 /* Assistant Message (Left-aligned clean block with icon) */
                 <div key={msg.id} className="flex gap-4 items-start">
-                  <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shrink-0 text-xs font-bold mt-0.5">
+                  <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 shadow-2xs">
                     AI
                   </div>
                   <div className="flex-1 text-slate-800 text-sm sm:text-base leading-relaxed whitespace-pre-wrap pt-1">
@@ -188,17 +189,17 @@ export default function ChatbotView() {
             {/* Assistant Typing Indicator */}
             {isTyping && (
               <div className="flex gap-4 items-center">
-                <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shrink-0 text-xs font-bold">
+                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 text-xs font-bold shadow-2xs">
                   AI
                 </div>
                 <div className="flex items-center gap-1.5 py-2">
-                  <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
                   <span
-                    className="w-2 h-2 rounded-full bg-slate-400 animate-pulse"
+                    className="w-2 h-2 rounded-full bg-sky-400 animate-pulse"
                     style={{ animationDelay: '150ms' }}
                   />
                   <span
-                    className="w-2 h-2 rounded-full bg-slate-400 animate-pulse"
+                    className="w-2 h-2 rounded-full bg-sky-400 animate-pulse"
                     style={{ animationDelay: '300ms' }}
                   />
                 </div>
@@ -217,7 +218,7 @@ export default function ChatbotView() {
             e.preventDefault()
             handleSendMessage()
           }}
-          className="relative bg-slate-100 focus-within:bg-white focus-within:ring-1 focus-within:ring-slate-300 border border-slate-200 rounded-3xl p-2 sm:p-2.5 flex items-end gap-2 transition shadow-2xs"
+          className="relative bg-slate-100 focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-500 focus-within:border-sky-500 border border-slate-200 rounded-3xl p-2 sm:p-2.5 flex items-end gap-2 transition-all duration-150 shadow-2xs"
         >
           <textarea
             ref={textareaRef}
@@ -229,14 +230,14 @@ export default function ChatbotView() {
             className="flex-1 bg-transparent border-0 focus:ring-0 focus:outline-none resize-none text-sm sm:text-base px-3 py-1.5 text-slate-900 placeholder-slate-400 max-h-36 leading-normal"
           />
 
-          {/* ChatGPT Style Circular Send Button (Up Arrow) */}
+          {/* Primary Action Circular Send Button (Up Arrow) */}
           <button
             type="submit"
             disabled={!inputValue.trim()}
             aria-label="Send message"
-            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition cursor-pointer ${
+            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all duration-150 cursor-pointer ${
               inputValue.trim()
-                ? 'bg-slate-900 text-white hover:bg-slate-800'
+                ? 'bg-sky-600 text-white hover:bg-sky-700 active:scale-[0.95] shadow-xs'
                 : 'bg-slate-300 text-slate-100 cursor-not-allowed'
             }`}
           >
