@@ -49,37 +49,38 @@ packing-optimizer-3d/
 ├── README.md                         # Quickstart guide
 ├── backend/
 │   ├── requirements.txt              # Python dependencies specification
-│   ├── products_dataset.csv          # 50-item benchmark dataset for packing optimization
+│   ├── migrate_to_sqlite.py          # Migration script from CSV to SQLite
 │   ├── data/
+│   │   ├── products_dataset.csv      # 50-item benchmark dataset for packing optimization
+│   │   ├── products.db               # SQLite database containing 'products' & 'prodcuts'
 │   │   ├── materials.json            # Packaging box materials (corrugated, plastic, wood)
-│   │   ├── padding_rules.json        # Fragility and cushion thickness rules by material
-│   │   └── products_dataset.csv      # Data copy for backend services
+│   │   └── padding_rules.json        # Fragility and cushion thickness rules by material
 │   └── app/
 │       ├── main.py                   # FastAPI server entry point with CORS and routes
+│       ├── db.py                     # SQLite connection, initialization, and queries
 │       ├── models.py                 # AzureChatOpenAI client configuration
 │       ├── validation.py             # Physical dimension & weight validation logic
 │       ├── agents/
 │       │   ├── __init__.py           # Agent exports
-│       │   └── requirement.py        # LangGraph workflow, LayaRouter, & HITL logic
+│       │   ├── requirement.py        # LangGraph workflow, LayaRouter, & HITL logic
+│       │   └── retrieval_gathering.py# Deterministic metrics & package candidate retrieval agent
 │       ├── api/
 │       │   ├── __init__.py           # Route collection exports
 │       │   ├── requirement_routes.py # AI agent endpoints (/api/requirements)
 │       │   ├── custom_box_routes.py  # Sizing & product endpoints (/api/custom-box)
 │       │   └── packing_routes.py     # 3D bin packing endpoints (/api/packing)
-│       ├── custom_box/
-│       │   ├── __init__.py
-│       │   ├── constraints.py        # Parcel carrier & material strength checks
-│       │   ├── multi_unit.py         # 3D grid layout optimization for SNP > 1
-│       │   ├── padding_rules.py      # Foam & clearance determination
-│       │   └── sizing.py             # Internal/external dimensions, tare, & gross weights
-│       ├── packing/
-│       │   ├── __init__.py
-│       │   ├── grid_packer.py        # 3D corner-point container placement heuristic
-│       │   ├── optimizer.py          # Multi-carton candidate evaluation
-│       │   └── orientations.py       # 6-degree orthogonal rotation permutations
-│       └── render/
-│           ├── __init__.py
-│           └── viewer.py             # Three.js 3D scene dictionary generator
+│       └── services/                 # Core domain & calculation services
+│           ├── custom_box/
+│           │   ├── sizing.py         # Box sizing, weights, volumetric weights
+│           │   ├── padding_rules.py  # Foam & clearance rules
+│           │   ├── constraints.py    # Parcel carrier & material strength checks
+│           │   └── multi_unit.py     # 3D grid layout optimization for SNP > 1
+│           ├── packing/
+│           │   ├── grid_packer.py    # 3D corner-point placement heuristic
+│           │   ├── optimizer.py      # Standard carton optimizer
+│           │   └── orientations.py   # 6-degree orthogonal rotations
+│           └── render/
+│               └── viewer.py         # Three.js 3D scene dictionary generator
 └── frontend/                         # Vite + React + TypeScript frontend
 ```
 
@@ -143,9 +144,9 @@ packing-optimizer-3d/
 - **Synchronous Handler Optimization**:
   - Declared CPU-bound algorithmic handlers as standard `def` functions so FastAPI manages them on worker threadpools without event loop contention.
 
-### Phase 6: Product Benchmark Dataset (`products_dataset.csv`)
+### Phase 6: Product Benchmark Dataset (`data/products_dataset.csv`)
 - **Dataset Creation**:
-  - Created [`backend/products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/products_dataset.csv) and mirrored to [`backend/data/products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products_dataset.csv).
+  - Created [`backend/data/products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products_dataset.csv).
   - Includes **50 realistic components** designed as simple 3D geometric primitives (boxes, cylinders, plates, L/U-extrusions) for easy CAD / Three.js modeling.
   - **Dynamic Range**:
     - Length: $25\text{ mm}$ to $1150\text{ mm}$ ($\sim 46\times$ range)
@@ -156,6 +157,17 @@ packing-optimizer-3d/
 
 ### Phase 7: Clean Dependency Specification (`requirements.txt`)
 - Replaced the previous binary-encoded requirements file with a clean, UTF-8 encoded [`backend/requirements.txt`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/requirements.txt) covering FastAPI, LangGraph, LangChain, OpenAI, Laya, and NumPy.
+
+### Phase 8: SQLite Database Migration & Integration (`backend/migrate_to_sqlite.py` & `backend/app/db.py`)
+- **Database Engine (`backend/app/db.py`)**:
+  - Configured persistent SQLite database at `backend/data/products.db` (configurable via `SQLITE_DB_PATH`).
+  - Created schema with table `products` and alias view `prodcuts` to ensure queries to either spelling succeed.
+- **Migration Script (`backend/migrate_to_sqlite.py`)**:
+  - Automatically loads `products_dataset.csv` and upserts records into the SQLite table.
+  - Supports `--clean`, `--csv`, and `--db` command-line flags.
+- **API Integration**:
+  - Updated `backend/app/api/custom_box_routes.py` to query from SQLite database directly with automatic CSV fallback if the database file is not yet migrated.
+  - Added `GET /api/custom-box/products/{part_name}` to fetch single products by name.
 
 ---
 
@@ -169,7 +181,10 @@ packing-optimizer-3d/
 | `/api/requirements/parse` | `POST` | `{"requirement": "text"}` | Quick LayaRouter completeness check (`extract_requirements` vs `HITL`) |
 | `/api/requirements/extract` | `POST` | `{"requirement": "text"}` | Directly extracts structured `Requirements` schema |
 | `/api/requirements/hitl/resolve` | `POST` | `{"original_requirement": "...", "additional_info": "..."}` | Appends user clarifications and re-runs the agent |
-| `/api/custom-box/products` | `GET` | None | Returns the 50 products from `products_dataset.csv` |
+| `/api/products` | `GET` | Optional query params: `search`, `part_type`, `limit`, `offset` | Direct SQLite product catalog search and list |
+| `/api/products/{id_or_name}` | `GET` | None | Retrieve single product by numeric ID or part name |
+| `/api/custom-box/products` | `GET` | None | Returns the 50 products from SQLite DB / CSV |
+| `/api/custom-box/products/{part_name}` | `GET` | None | Returns a single product by part name |
 | `/api/custom-box/materials` | `GET` | None | Returns list of supported box materials |
 | `/api/custom-box/padding-rules` | `GET` | None | Returns padding thickness and cushion rules |
 | `/api/custom-box/calculate` | `POST` | `CustomBoxCalculationRequest` | Returns multi-unit layout, padding, box sizing, weights, and constraints |
@@ -179,12 +194,150 @@ packing-optimizer-3d/
 
 ---
 
-## 6. How to Run & Verify
+## 6. Database Migration Guide (CSV to SQLite)
 
-### 1. Activate Environment & Run Server
+The migration script [`backend/migrate_to_sqlite.py`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/migrate_to_sqlite.py) transfers the benchmark dataset ([`data/products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products_dataset.csv)) into a local, high-performance SQLite database ([`backend/data/products.db`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products.db)).
+
+### Quick Migration Command
+
+From your workspace root or the `backend` folder:
+
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
+python migrate_to_sqlite.py
+```
+
+### Command-Line Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--csv <path>` | `data/products_dataset.csv` | Path to the source CSV file |
+| `--db <path>` | `data/products.db` | Path to the target SQLite database file |
+| `--clean` | `False` | Truncates table and resets autoincrement ID sequence before migration |
+
+#### Clean Re-migration Example:
+```powershell
+python migrate_to_sqlite.py --clean
+```
+
+### Table & View Architecture
+
+The migration script automatically executes the following DDL:
+
+```sql
+-- Primary table
+CREATE TABLE IF NOT EXISTS products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    part_name TEXT NOT NULL UNIQUE,
+    part_length REAL NOT NULL,
+    part_breadth REAL NOT NULL,
+    part_height REAL NOT NULL,
+    part_weight REAL NOT NULL,
+    part_type TEXT NOT NULL,
+    standard_no_of_parts INTEGER NOT NULL,
+    domestic_or_international TEXT NOT NULL,
+    per_day_requirement INTEGER NOT NULL,
+    minimum_order_quantity INTEGER NOT NULL,
+    line_feeding_method TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Compatibility alias view for 'prodcuts'
+CREATE VIEW IF NOT EXISTS prodcuts AS SELECT * FROM products;
+```
+
+### Verification & SQL Querying
+You can verify the database directly with Python or any SQLite CLI:
+
+```powershell
+python -c "import sqlite3; conn = sqlite3.connect('data/products.db'); print('Total products:', conn.execute('SELECT COUNT(*) FROM prodcuts').fetchone()[0])"
+```
+
+---
+
+## 7. Frontend TypeScript (TS) Integration
+
+TypeScript types and API client functions are defined in the `frontend` folder:
+- **Types**: [`frontend/src/types/customBox.ts`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/frontend/src/types/customBox.ts)
+- **API Client**: [`frontend/src/services/customBoxApi.ts`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/frontend/src/services/customBoxApi.ts)
+
+### Core TypeScript Interfaces
+
+```typescript
+// Product interface matching the SQLite schema
+export interface Product {
+  id?: number;
+  part_name: string;
+  part_length: number;
+  part_breadth: number;
+  part_height: number;
+  part_weight: number;
+  part_type: string;
+  standard_no_of_parts: number;
+  domestic_or_international: 'Domestic' | 'International' | string;
+  per_day_requirement: number;
+  minimum_order_quantity: number;
+  line_feeding_method: string;
+  created_at?: string;
+}
+
+// 3D Scene object ready for Three.js rendering
+export interface Scene3DData {
+  container: {
+    dimensions: { length: number; width: number; height: number; volume_liters?: number };
+    center: { x: number; y: number; z: number };
+  };
+  items: Array<{
+    id: string;
+    color: string;
+    position: { x: number; y: number; z: number };
+    dimensions: { length: number; width: number; height: number };
+    weight_kg: number;
+  }>;
+  metrics: {
+    volume_utilization_pct: number;
+    placed_count: number;
+  };
+}
+```
+
+### Frontend Usage Example
+
+```typescript
+import { getProducts, calculateCustomBox } from './services/customBoxApi';
+
+// 1. Fetch products from SQLite database
+const { products } = await getProducts();
+const selected = products[0];
+
+// 2. Compute custom box sizing and constraints
+const result = await calculateCustomBox({
+  part_length: selected.part_length,
+  part_width: selected.part_breadth,
+  part_height: selected.part_height,
+  part_weight: selected.part_weight,
+  part_type: selected.part_type,
+  quantity: selected.standard_no_of_parts,
+});
+
+console.log('Box External Dimensions:', result.box_sizing.external_dimensions_mm);
+console.log('Padding Thickness:', result.padding.applied_thickness_mm);
+```
+
+---
+
+## 8. How to Run & Verify
+
+### 1. Run SQLite Migration & Start Backend
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+
+# Run the migration script to populate data/products.db
+python migrate_to_sqlite.py
+
+# Start the FastAPI server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
