@@ -9,6 +9,7 @@ from app.custom_box.padding_rules import get_padding_for_part, load_padding_rule
 from app.custom_box.sizing import calculate_box_dimensions
 from app.custom_box.constraints import validate_box_constraints
 from app.custom_box.multi_unit import calculate_multi_unit_layout
+from app.db import get_all_products, get_product_by_name
 
 router = APIRouter(prefix="/custom-box", tags=["Custom Box Sizing"])
 
@@ -28,6 +29,15 @@ def _load_materials() -> List[Dict[str, Any]]:
 
 
 def _load_products() -> List[Dict[str, Any]]:
+    # 1. Primary: load from SQLite database
+    try:
+        db_items = get_all_products()
+        if db_items:
+            return db_items
+    except Exception:
+        pass
+
+    # 2. Fallback: load directly from CSV if database not yet migrated
     if os.path.exists(PRODUCTS_CSV_PATH):
         try:
             with open(PRODUCTS_CSV_PATH, "r", encoding="utf-8") as f:
@@ -64,11 +74,24 @@ class CustomBoxCalculationRequest(BaseModel):
     custom_padding_thickness_mm: Optional[float] = Field(default=None, description="Override padding thickness in mm")
 
 
-@router.get("/products", summary="List products from the packing optimization dataset")
+@router.get("/products", summary="List products from the packing database (table: products/prodcuts)")
 def get_products():
-    """Retrieve product records from the dataset for custom box sizing and packing."""
+    """Retrieve product records from SQLite database (or fallback CSV) for custom box sizing and packing."""
     products = _load_products()
-    return {"products": products, "total": len(products)}
+    return {"products": products, "total": len(products), "source": "sqlite" if os.path.exists(os.path.join(BACKEND_DIR, "data", "products.db")) else "csv"}
+
+
+@router.get("/products/{part_name}", summary="Get a single product by part name")
+def get_product(part_name: str):
+    """Retrieve a single product from the database by its part name."""
+    product = get_product_by_name(part_name)
+    if not product:
+        # Check fallback
+        all_prods = _load_products()
+        product = next((p for p in all_prods if p.get("part_name", "").lower() == part_name.strip().lower()), None)
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{part_name}' not found")
+    return product
 
 
 @router.get("/materials", summary="List available packaging box materials")
