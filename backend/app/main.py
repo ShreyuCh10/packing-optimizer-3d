@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.requirement_routes import router as requirement_router
 from app.api.custom_box_routes import router as custom_box_router
 from app.api.packing_routes import router as packing_router
+from app.api.product_routes import router as product_router
 
 app = FastAPI(
     title="3D Packing Optimizer API",
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 # Register API routes under /api
+app.include_router(product_router, prefix="/api")
 app.include_router(requirement_router, prefix="/api")
 app.include_router(custom_box_router, prefix="/api")
 app.include_router(packing_router, prefix="/api")
@@ -33,6 +35,7 @@ def root():
         "service": "3D Packing Optimizer API",
         "version": "1.0.0",
         "endpoints": {
+            "products": "/api/products",
             "requirements": "/api/requirements",
             "custom_box": "/api/custom-box",
             "packing": "/api/packing",

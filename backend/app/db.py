@@ -71,3 +71,16 @@ def get_product_by_name(part_name: str, db_path: Optional[str] = None) -> Option
     finally:
         conn.close()
 
+
+def get_product_by_id(product_id: int, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single product by ID."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM products WHERE id = ? LIMIT 1", (product_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
