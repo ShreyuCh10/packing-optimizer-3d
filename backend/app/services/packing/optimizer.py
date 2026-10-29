@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from app.packing.grid_packer import pack_items_into_container
+from app.services.packing.grid_packer import pack_items_into_container
 
 
 STANDARD_CARTON_SIZES = [

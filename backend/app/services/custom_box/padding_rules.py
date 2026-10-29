@@ -2,7 +2,8 @@ import json
 import os
 from typing import Dict, Any, Optional
 
-DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "padding_rules.json")
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+DATA_PATH = os.path.join(BACKEND_DIR, "data", "padding_rules.json")
 
 
 def load_padding_rules() -> Dict[str, Any]:

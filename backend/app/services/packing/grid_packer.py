@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from app.packing.orientations import get_possible_orientations
+from app.services.packing.orientations import get_possible_orientations
 
 
 class PlacedItem:

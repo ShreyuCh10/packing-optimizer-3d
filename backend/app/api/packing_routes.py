@@ -2,9 +2,9 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.packing.grid_packer import pack_items_into_container
-from app.packing.optimizer import optimize_packing, STANDARD_CARTON_SIZES
-from app.render.viewer import generate_scene_data
+from app.services.packing.grid_packer import pack_items_into_container
+from app.services.packing.optimizer import optimize_packing, STANDARD_CARTON_SIZES
+from app.services.render.viewer import generate_scene_data
 
 router = APIRouter(prefix="/packing", tags=["3D Packing Optimizer"])
 

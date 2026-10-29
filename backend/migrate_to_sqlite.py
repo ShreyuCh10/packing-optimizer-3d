@@ -5,7 +5,7 @@ Usage:
     python migrate_to_sqlite.py
 
 Optional arguments:
-    --csv <path_to_csv>       Path to products CSV (default: products_dataset.csv)
+    --csv <path_to_csv>       Path to products CSV (default: data/products_dataset.csv)
     --db  <path_to_db>        Path to SQLite DB (default: data/products.db)
     --clean                   Drop and recreate table before migration
 """
@@ -23,18 +23,13 @@ if SCRIPT_DIR not in sys.path:
 
 from app.db import DEFAULT_DB_PATH, init_db, get_db_connection
 
-DEFAULT_CSV_PATH = os.path.join(SCRIPT_DIR, "products_dataset.csv")
+DEFAULT_CSV_PATH = os.path.join(SCRIPT_DIR, "data", "products_dataset.csv")
 
 
 def migrate_csv_to_sqlite(csv_path: str, db_path: str, clean: bool = False) -> int:
     """Migrate rows from CSV file into SQLite database table 'products'."""
     if not os.path.exists(csv_path):
-        # Check fallback in data/
-        alt_path = os.path.join(SCRIPT_DIR, "data", "products_dataset.csv")
-        if os.path.exists(alt_path):
-            csv_path = alt_path
-        else:
-            raise FileNotFoundError(f"Source CSV file not found at: {csv_path}")
+        raise FileNotFoundError(f"Source CSV file not found at: {csv_path}")
 
     print(f"--> Source CSV: {os.path.abspath(csv_path)}")
     print(f"--> Target SQLite DB: {os.path.abspath(db_path)}")

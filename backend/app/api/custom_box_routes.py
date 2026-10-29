@@ -5,17 +5,17 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.custom_box.padding_rules import get_padding_for_part, load_padding_rules
-from app.custom_box.sizing import calculate_box_dimensions
-from app.custom_box.constraints import validate_box_constraints
-from app.custom_box.multi_unit import calculate_multi_unit_layout
+from app.services.custom_box.padding_rules import get_padding_for_part, load_padding_rules
+from app.services.custom_box.sizing import calculate_box_dimensions
+from app.services.custom_box.constraints import validate_box_constraints
+from app.services.custom_box.multi_unit import calculate_multi_unit_layout
 from app.db import get_all_products, get_product_by_name
 
 router = APIRouter(prefix="/custom-box", tags=["Custom Box Sizing"])
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 MATERIALS_PATH = os.path.join(BACKEND_DIR, "data", "materials.json")
-PRODUCTS_CSV_PATH = os.path.join(BACKEND_DIR, "products_dataset.csv")
+PRODUCTS_CSV_PATH = os.path.join(BACKEND_DIR, "data", "products_dataset.csv")
 
 
 def _load_materials() -> List[Dict[str, Any]]:
