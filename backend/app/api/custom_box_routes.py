@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 from typing import List, Optional, Dict, Any
@@ -11,7 +12,9 @@ from app.custom_box.multi_unit import calculate_multi_unit_layout
 
 router = APIRouter(prefix="/custom-box", tags=["Custom Box Sizing"])
 
-MATERIALS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "materials.json")
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+MATERIALS_PATH = os.path.join(BACKEND_DIR, "data", "materials.json")
+PRODUCTS_CSV_PATH = os.path.join(BACKEND_DIR, "products_dataset.csv")
 
 
 def _load_materials() -> List[Dict[str, Any]]:
@@ -19,6 +22,32 @@ def _load_materials() -> List[Dict[str, Any]]:
         try:
             with open(MATERIALS_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def _load_products() -> List[Dict[str, Any]]:
+    if os.path.exists(PRODUCTS_CSV_PATH):
+        try:
+            with open(PRODUCTS_CSV_PATH, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                return [
+                    {
+                        "part_name": row["part_name"],
+                        "part_length": float(row["part_length"]),
+                        "part_breadth": float(row["part_breadth"]),
+                        "part_height": float(row["part_height"]),
+                        "part_weight": float(row.get("part_weight", 1.0)),
+                        "part_type": row["part_type"],
+                        "standard_no_of_parts": int(row["standard_no_of_parts"]),
+                        "domestic_or_international": row["domestic_or_international"],
+                        "per_day_requirement": int(row["per_day_requirement"]),
+                        "minimum_order_quantity": int(row["minimum_order_quantity"]),
+                        "line_feeding_method": row["line_feeding_method"],
+                    }
+                    for row in reader
+                ]
         except Exception:
             pass
     return []
@@ -33,6 +62,13 @@ class CustomBoxCalculationRequest(BaseModel):
     quantity: int = Field(default=1, ge=1, description="Quantity / SNP (Standard Number of Packs)")
     material_id: Optional[str] = Field(default="corrugated-double-wall", description="Packaging material ID")
     custom_padding_thickness_mm: Optional[float] = Field(default=None, description="Override padding thickness in mm")
+
+
+@router.get("/products", summary="List products from the packing optimization dataset")
+def get_products():
+    """Retrieve product records from the dataset for custom box sizing and packing."""
+    products = _load_products()
+    return {"products": products, "total": len(products)}
 
 
 @router.get("/materials", summary="List available packaging box materials")

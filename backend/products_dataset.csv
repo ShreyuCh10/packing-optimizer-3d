@@ -1,0 +1,51 @@
+part_name,part_length,part_breadth,part_height,part_weight,part_type,standard_no_of_parts,domestic_or_international,per_day_requirement,minimum_order_quantity,line_feeding_method
+Micro Terminal Block,28,18,14,0.02,Plastic (Nylon),64,Domestic,600,1200,Two-Bin System
+Steel Dowel Pin Small,35,10,10,0.03,Hardened Steel,50,Domestic,500,1000,Two-Bin System
+Snap Lock Fastener,32,24,16,0.02,Plastic (POM),100,Domestic,1000,2000,Bulk Feeding
+Hexagonal Standoff Spacer,25,25,40,0.05,Brass,48,International,480,960,Two-Bin System
+Miniature Spacer Washer,45,45,5,0.04,Stainless Steel,80,Domestic,800,1600,Bulk Feeding
+Precision Locator Bushing,30,30,25,0.08,Bronze,40,International,320,640,Kitting
+Rubber O-Ring Collar,55,55,12,0.03,Rubber (EPDM),50,Domestic,500,1000,Two-Bin System
+Small L-Bracket Mount,85,60,40,0.32,Steel,24,Domestic,360,360,Kanban
+Compact Heatsink Block,110,75,30,0.38,Aluminum,16,International,240,480,Kitting
+Square Junction Box Mini,90,90,50,0.18,Plastic (ABS),18,Domestic,270,270,Kanban
+Shaft Collar Clamp,70,70,28,0.45,Steel,20,Domestic,300,300,Two-Bin System
+Round Mounting Flange Small,100,100,20,0.85,Cast Iron,12,Domestic,180,180,Direct to Line (JIT)
+Flat Shim Spacer Plate,120,70,6,0.22,Stainless Steel,30,International,450,900,Two-Bin System
+Rectangular Terminal Strip,140,45,28,0.15,Plastic (Nylon),24,Domestic,360,360,Kanban
+Standard Base Plate,250,180,18,2.20,Aluminum,6,Domestic,150,75,Bulk Feeding
+U-Channel Guide Bracket,220,95,60,1.45,Steel,8,Domestic,160,80,Kanban
+Cylindrical Heavy Bushing,120,120,160,4.20,Cast Iron,4,Domestic,120,120,Direct to Line (JIT)
+Electronic Control Enclosure,240,160,70,0.65,Plastic (Polycarbonate),8,International,200,400,Kitting
+Stepped Spacer Block,160,100,55,1.80,Aluminum,8,Domestic,160,160,Kanban
+Square Flange Adapter,180,180,30,3.60,Steel,4,Domestic,100,100,Direct to Line (JIT)
+V-Block Clamping Fixture,150,90,75,3.10,Cast Steel,4,Domestic,80,80,Kanban
+Heavy Heatsink Base,260,150,45,2.40,Copper / Aluminum,4,International,120,240,Kitting
+Ductile Iron Anchor Foot,160,140,90,4.50,Ductile Iron,4,Domestic,90,90,Direct to Line (JIT)
+Pivoting Hinge Block,140,80,65,1.70,Stainless Steel,8,International,140,280,Kanban
+Linear Motion Guide Rail,750,35,30,4.80,Hardened Steel,4,International,120,240,Sequential Feeding (JIS)
+Slender Connecting Rod Bar,520,45,35,2.10,Alloy Steel,6,Domestic,150,75,Sequential Feeding (JIS)
+Aluminum Structural Strut,900,45,45,1.90,Aluminum,4,Domestic,100,50,Bulk Feeding
+Hollow Steel Crossbeam Tube,1150,70,70,6.80,Structural Steel,2,Domestic,80,40,Sequential Feeding (JIS)
+Long Splined Drive Shaft,680,55,55,5.60,Alloy Steel,3,International,90,180,Direct to Line (JIT)
+Solid Guide Tie Rod,850,30,30,4.40,Stainless Steel,4,Domestic,100,100,Sequential Feeding (JIS)
+Angle Iron Stiffener Bar,1050,60,60,5.90,Steel,2,Domestic,70,70,Sequential Feeding (JIS)
+Sheet Metal Enclosure Cover,520,380,4,2.80,Sheet Metal,10,Domestic,160,80,Bulk Feeding
+Acrylic Inspection Window Pane,460,340,6,1.15,Acrylic Glass,8,International,120,240,Kitting
+Aluminum Equipment Mounting Plate,620,420,10,6.90,Aluminum,3,Domestic,90,45,Bulk Feeding
+Carbon Fiber Reinforced Sheet,580,360,5,1.45,Carbon Fiber,6,International,80,160,Kitting
+Perforated Ventilation Grille,440,280,8,1.30,Sheet Metal,10,Domestic,180,90,Bulk Feeding
+Heavy Steel Wear Liner Plate,480,300,15,7.50,High-Carbon Steel,2,Domestic,60,60,Direct to Line (JIT)
+Vertical Structural Post,85,85,480,6.20,Steel,2,Domestic,70,70,Sequential Feeding (JIS)
+Hydraulic Cylinder Body Tube,115,115,540,9.80,Steel,2,International,60,120,Direct to Line (JIT)
+Tower Standoff Column,75,75,380,3.40,Aluminum,4,Domestic,100,100,Kanban
+Pneumatic Actuator Mast,95,95,420,5.10,Stainless Steel,2,International,80,160,Sequential Feeding (JIS)
+Heavy Stamping Die Block,360,260,180,28.50,Tool Steel,1,Domestic,30,15,Direct to Line (JIT)
+Machine Tool Bed Slide Block,480,320,140,34.00,Cast Iron,1,Domestic,25,25,Direct to Line (JIT)
+Industrial Transformer Core Block,420,310,240,31.00,Silicon Steel,1,International,40,40,Kitting
+Solid Counterweight Ingot,300,200,160,38.00,Cast Iron,1,Domestic,50,50,Bulk Feeding
+Large Compressor Head Casting,450,380,210,22.00,Cast Aluminum,1,International,45,45,Sequential Feeding (JIS)
+Pallet Staging Box Enclosure,620,480,320,8.20,HDPE Plastic,1,Domestic,60,30,Bulk Feeding
+Heavy Flanged Base Anchor,380,380,160,24.50,Cast Steel,1,Domestic,40,40,Direct to Line (JIT)
+High-Capacity Battery Enclosure,520,340,190,14.80,Aluminum / Composite,1,International,50,100,Kitting
+Solid Ballast Block,280,280,220,42.00,Cast Steel,1,Domestic,30,30,Bulk Feeding
