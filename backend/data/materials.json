@@ -1,0 +1,48 @@
+[
+  {
+    "id": "corrugated-single-wall",
+    "name": "Single Wall Corrugated Cardboard (ECT 32)",
+    "wall_thickness_mm": 4.0,
+    "max_weight_kg": 15.0,
+    "density_kg_m3": 120.0,
+    "burst_strength_kpa": 1400,
+    "cost_per_sqm": 1.20
+  },
+  {
+    "id": "corrugated-double-wall",
+    "name": "Double Wall Heavy Duty Cardboard (ECT 48)",
+    "wall_thickness_mm": 7.0,
+    "max_weight_kg": 35.0,
+    "density_kg_m3": 180.0,
+    "burst_strength_kpa": 2200,
+    "cost_per_sqm": 2.50
+  },
+  {
+    "id": "corrugated-triple-wall",
+    "name": "Triple Wall Industrial Cardboard (ECT 71)",
+    "wall_thickness_mm": 12.0,
+    "max_weight_kg": 75.0,
+    "density_kg_m3": 250.0,
+    "burst_strength_kpa": 3500,
+    "cost_per_sqm": 4.80
+  },
+  {
+    "id": "polypropylene-corrugated",
+    "name": "Polypropylene Fluted Plastic Box",
+    "wall_thickness_mm": 5.0,
+    "max_weight_kg": 25.0,
+    "density_kg_m3": 160.0,
+    "burst_strength_kpa": 1900,
+    "cost_per_sqm": 3.40
+  },
+  {
+    "id": "wooden-crate",
+    "name": "Plywood / Wood Reinforced Crate",
+    "wall_thickness_mm": 18.0,
+    "max_weight_kg": 250.0,
+    "density_kg_m3": 600.0,
+    "burst_strength_kpa": 7000,
+    "cost_per_sqm": 12.00
+  }
+]
+

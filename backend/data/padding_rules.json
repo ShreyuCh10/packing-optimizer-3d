@@ -1,0 +1,60 @@
+{
+  "rules": [
+    {
+      "part_type": "glass",
+      "recommended_padding": "epe_foam",
+      "thickness_mm": 35.0,
+      "min_clearance_mm": 10.0,
+      "fragility": "high"
+    },
+    {
+      "part_type": "electronics",
+      "recommended_padding": "esd_anti_static_foam",
+      "thickness_mm": 25.0,
+      "min_clearance_mm": 8.0,
+      "fragility": "high"
+    },
+    {
+      "part_type": "steel",
+      "recommended_padding": "dense_eva_foam",
+      "thickness_mm": 20.0,
+      "min_clearance_mm": 5.0,
+      "fragility": "medium"
+    },
+    {
+      "part_type": "aluminum",
+      "recommended_padding": "polyethylene_foam",
+      "thickness_mm": 15.0,
+      "min_clearance_mm": 5.0,
+      "fragility": "medium"
+    },
+    {
+      "part_type": "plastic",
+      "recommended_padding": "bubble_wrap",
+      "thickness_mm": 12.0,
+      "min_clearance_mm": 5.0,
+      "fragility": "low"
+    },
+    {
+      "part_type": "wood",
+      "recommended_padding": "corrugated_cushion",
+      "thickness_mm": 10.0,
+      "min_clearance_mm": 5.0,
+      "fragility": "low"
+    },
+    {
+      "part_type": "standard",
+      "recommended_padding": "kraft_paper_cushion",
+      "thickness_mm": 10.0,
+      "min_clearance_mm": 5.0,
+      "fragility": "low"
+    }
+  ],
+  "default_rule": {
+    "recommended_padding": "epe_foam",
+    "thickness_mm": 15.0,
+    "min_clearance_mm": 5.0,
+    "fragility": "medium"
+  }
+}
+
