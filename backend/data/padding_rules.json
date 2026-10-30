@@ -1,0 +1,7 @@
+{
+  "door":    { "padding_mm": 20, "max_stack": 5 },
+  "tile":    { "padding_mm": 5,  "max_stack": 20 },
+  "bottle":  { "padding_mm": 10, "max_stack": 3 },
+  "bolt":    { "padding_mm": 0,  "max_stack": 100 },
+  "default": { "padding_mm": 10, "max_stack": 3 }
+}

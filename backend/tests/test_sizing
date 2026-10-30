@@ -1,0 +1,58 @@
+import pytest
+from pydantic import ValidationError
+from app.models import Dimensions, Item, CustomBoxResult, CustomBoxRequest
+from app.custom_box.sizing import size_custom_box
+
+def make_door():
+    return Item(
+        dimensions=Dimensions(length=2000, width=900, height=40),
+        weight=25,
+        quantity=1,
+    )
+
+
+def test_door_with_padding_20():
+    # Hand calculation: each side gets 20, so each dimension grows by 2 * 20 = 40
+    # 2000 + 40 = 2040, 900 + 40 = 940, 40 + 40 = 80
+    result = size_custom_box(make_door(), padding=20)
+    assert result.box_dimensions.length == 2040
+    assert result.box_dimensions.width == 940
+    assert result.box_dimensions.height == 80
+
+
+def test_volume_of_custom_box():
+    # 2040 * 940 * 80 = 153,408,000 mm³
+    result = size_custom_box(make_door(), padding=20)
+    assert result.volume == pytest.approx(153_408_000)
+
+
+def test_utilization_with_padding_20():
+    # Item volume 2000 * 900 * 40 = 72,000,000
+    # 72,000,000 / 153,408,000 = about 0.4693
+    result = size_custom_box(make_door(), padding=20)
+    assert result.utilization == pytest.approx(0.4693, abs=1e-4)
+
+
+def test_zero_padding_box_equals_item():
+    result = size_custom_box(make_door(), padding=0)
+    assert result.box_dimensions.length == 2000
+    assert result.box_dimensions.width == 900
+    assert result.box_dimensions.height == 40
+    assert result.utilization == pytest.approx(1.0)
+
+
+def test_utilization_always_between_0_and_1():
+    for padding in [0, 1, 5, 20, 100]:
+        result = size_custom_box(make_door(), padding=padding)
+        assert 0 <= result.utilization <= 1
+
+
+def test_more_padding_means_lower_utilization():
+    small = size_custom_box(make_door(), padding=5)
+    large = size_custom_box(make_door(), padding=50)
+    assert large.utilization < small.utilization
+
+
+def test_negative_padding_rejected():
+    with pytest.raises(ValidationError):
+        CustomBoxRequest(item=make_door(), padding=-5)
