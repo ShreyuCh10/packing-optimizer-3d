@@ -337,7 +337,18 @@ def pack_single_container_extreme_points(
 
     all_fit = len(unplaced) == 0 and total_packed_weight <= max_wt
 
-    # Find winning primary orientation
+    # Compile orientation breakdown for all placed items
+    orientations_breakdown = [
+        {
+            "dimensions": {"length": orient[0], "width": orient[1], "height": orient[2]},
+            "count": count,
+            "percentage": round((count / max(1, len(placed))) * 100.0, 1),
+            "item_ids": [b.item_id for b in placed if (b.dx, b.dy, b.dz) == orient],
+        }
+        for orient, count in sorted(orientation_counter.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+    # Primary orientation (if any)
     if orientation_counter:
         best_orient_tuple = max(orientation_counter.items(), key=lambda kv: kv[1])[0]
         best_orient_dict = {
@@ -369,6 +380,7 @@ def pack_single_container_extreme_points(
         "wasted_volume_liters": round(wasted_vol / 1000000.0, 3),
         "bounding_box_utilization_pct": round(min(100.0, bounding_box_util), 2),
         "best_orientation": best_orient_dict,
+        "orientations_breakdown": orientations_breakdown,
         "placed_items": [b.to_dict() for b in placed],
         "unplaced_items": unplaced,
         "extreme_points_evaluated_count": len(generate_extreme_points(placed, c_l, c_w, c_h)),
@@ -663,6 +675,7 @@ def evaluate_and_rank_node(state: PackingOptimizerState) -> Dict[str, Any]:
             "max_weight_capacity_kg": best.get("max_weight_capacity_kg"),
         },
         "best_orientation": best_orientation,
+        "orientations_breakdown": best.get("orientations_breakdown", []),
         "fits": fits_all,
         "utilization_metrics": utilization_metrics,
         "scene_data": best.get("scene_data", {}),
@@ -707,6 +720,7 @@ def run_packing_optimizer(
         "summary": result.get("summary"),
         "best_container": result.get("best_container"),
         "best_orientation": result.get("best_orientation"),
+        "orientations_breakdown": result.get("orientations_breakdown", best_eval.get("orientations_breakdown", [])),
         "utilization_metrics": result.get("utilization_metrics"),
         "placed_items": best_eval.get("placed_items", []),
         "unplaced_items": best_eval.get("unplaced_items", []),

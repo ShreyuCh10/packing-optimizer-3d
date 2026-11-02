@@ -12,6 +12,7 @@ langgraph-checkpoint>=2.0.0
 langchain-core>=0.3.0
 langchain-openai>=0.2.0
 openai>=1.50.0
+python-dotenv>=1.0.0
 laya>=0.4.0
 
 # 3D Math & Geometry Processing
