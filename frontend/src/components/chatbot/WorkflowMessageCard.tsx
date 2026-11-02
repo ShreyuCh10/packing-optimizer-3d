@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { WorkflowResult } from '../../types/workflow'
 import WorkflowStepProgress from './WorkflowStepProgress'
 import PackingSceneViewer from './PackingSceneViewer'
+import ToolExecutionTrace from './ToolExecutionTrace'
 
 interface WorkflowMessageCardProps {
   result: WorkflowResult
@@ -118,6 +119,9 @@ export default function WorkflowMessageCard({
           </div>
         </div>
       )}
+
+      {/* 3.5 Major Heading: Granular Agent Tool Use Trace */}
+      <ToolExecutionTrace steps={result.steps} />
 
       {/* 4. Multi-Agent Process Results (Only shown when not blocked by HITL) */}
       {!isHitl && (

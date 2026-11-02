@@ -104,6 +104,20 @@ export interface BestOrientation {
   count_at_this_orientation: number
 }
 
+export interface ToolExecutionStep {
+  id: string
+  tool_name: string
+  category: 'requirement' | 'retrieval' | 'optimization' | string
+  summary: string
+  status: 'success' | 'warning' | 'error' | string
+  method?: string
+  execution_status?: string
+  confidence?: number
+  confidence_threshold?: number
+  inputs?: Record<string, any>
+  outputs?: Record<string, any>
+}
+
 export interface WorkflowResult {
   status: string
   stage: 'requirement_gathering' | 'hitl' | 'retrieval_gathering' | 'packing_optimization' | string
@@ -120,6 +134,7 @@ export interface WorkflowResult {
   placed_items?: PlacedItem[]
   unplaced_items?: any[]
   scene_data?: SceneData
+  steps?: ToolExecutionStep[]
 }
 
 export interface ChatMessage {

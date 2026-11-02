@@ -55,21 +55,20 @@ export default function ChatbotView() {
   // Animated pipeline progress simulation while awaiting backend response
   useEffect(() => {
     if (!isTyping) {
-      setCurrentRunningStage('requirement_gathering')
+      setCurrentRunningStage('laya')
       return
     }
 
-    const t1 = setTimeout(() => {
-      setCurrentRunningStage('retrieval_gathering')
-    }, 700)
-
-    const t2 = setTimeout(() => {
-      setCurrentRunningStage('packing_optimization')
-    }, 1500)
+    const t1 = setTimeout(() => setCurrentRunningStage('extractor'), 400)
+    const t2 = setTimeout(() => setCurrentRunningStage('cushioning'), 800)
+    const t3 = setTimeout(() => setCurrentRunningStage('sqlite'), 1300)
+    const t4 = setTimeout(() => setCurrentRunningStage('optimizer'), 1800)
 
     return () => {
       clearTimeout(t1)
       clearTimeout(t2)
+      clearTimeout(t3)
+      clearTimeout(t4)
     }
   }, [isTyping])
 
@@ -266,56 +265,90 @@ export default function ChatbotView() {
                   <div className="flex items-center gap-2 mb-3">
                     <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
                     <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                      Executing 3-Agent Workflow
+                      Executing Multi-Agent Tool Trace
                     </span>
                   </div>
 
-                  {/* Visual mini-stepper */}
+                  {/* Visual 5-step tool progression mini-stepper */}
                   <div className="space-y-2 text-xs">
                     <div className="flex items-center gap-2 text-slate-700">
                       <span
                         className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'requirement_gathering'
+                          currentRunningStage === 'laya'
                             ? 'bg-sky-600 text-white animate-pulse'
                             : 'bg-emerald-500 text-white'
                         }`}
                       >
-                        {currentRunningStage === 'requirement_gathering' ? '1' : '✓'}
+                        {currentRunningStage === 'laya' ? '1' : '✓'}
                       </span>
-                      <span className={currentRunningStage === 'requirement_gathering' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Stage 1: Requirement Gathering (parsing geometry, SNP & padding rules)
+                      <span className={currentRunningStage === 'laya' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Step 1: Laya Semantic Gating Router (evaluating confidence & completeness)
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 text-slate-700">
                       <span
                         className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'retrieval_gathering'
+                          currentRunningStage === 'extractor'
                             ? 'bg-sky-600 text-white animate-pulse'
-                            : currentRunningStage === 'packing_optimization'
+                            : currentRunningStage === 'laya'
+                            ? 'bg-slate-200 text-slate-500'
+                            : 'bg-emerald-500 text-white'
+                        }`}
+                      >
+                        {currentRunningStage === 'extractor' ? '2' : currentRunningStage === 'laya' ? '2' : '✓'}
+                      </span>
+                      <span className={currentRunningStage === 'extractor' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Step 2: Specification Extractor (extracting geometries, weight, SNP & material)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <span
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          currentRunningStage === 'cushioning'
+                            ? 'bg-sky-600 text-white animate-pulse'
+                            : ['laya', 'extractor'].includes(currentRunningStage)
+                            ? 'bg-slate-200 text-slate-500'
+                            : 'bg-emerald-500 text-white'
+                        }`}
+                      >
+                        {currentRunningStage === 'cushioning' ? '3' : ['laya', 'extractor'].includes(currentRunningStage) ? '3' : '✓'}
+                      </span>
+                      <span className={currentRunningStage === 'cushioning' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Step 3: Cushioning Engine (calculating foam clearance & multi-unit bounding box)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <span
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          currentRunningStage === 'sqlite'
+                            ? 'bg-sky-600 text-white animate-pulse'
+                            : currentRunningStage === 'optimizer'
                             ? 'bg-emerald-500 text-white'
                             : 'bg-slate-200 text-slate-500'
                         }`}
                       >
-                        {currentRunningStage === 'retrieval_gathering' ? '2' : currentRunningStage === 'packing_optimization' ? '✓' : '2'}
+                        {currentRunningStage === 'sqlite' ? '4' : currentRunningStage === 'optimizer' ? '✓' : '4'}
                       </span>
-                      <span className={currentRunningStage === 'retrieval_gathering' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Stage 2: Retrieval Agent (querying SQLite inventory & ranking top containers)
+                      <span className={currentRunningStage === 'sqlite' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Step 4: SQLite Database Query (scanning cartons, stillages & pallets)
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 text-slate-700">
                       <span
                         className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'packing_optimization'
+                          currentRunningStage === 'optimizer'
                             ? 'bg-sky-600 text-white animate-pulse'
                             : 'bg-slate-200 text-slate-500'
                         }`}
                       >
-                        3
+                        5
                       </span>
-                      <span className={currentRunningStage === 'packing_optimization' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Stage 3: Packing Optimizer (3D Extreme Point placement & Three.js scene)
+                      <span className={currentRunningStage === 'optimizer' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Step 5: 3D Extreme Point Optimizer (evaluating 6-DOF rotations & stability)
                       </span>
                     </div>
                   </div>
