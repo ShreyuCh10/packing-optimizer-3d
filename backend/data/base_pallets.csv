@@ -1,0 +1,4 @@
+base_pallet,outer_length_mm,outer_width_mm,outer_height_mm,empty_weight_kg
+Base Pallet 1,1200,800,160,26
+Base Pallet 2,1200,1000,160,28
+Base Pallet 3,1300,1100,160,30

@@ -55,6 +55,7 @@ def _load_products() -> List[Dict[str, Any]]:
                         "per_day_requirement": int(row["per_day_requirement"]),
                         "minimum_order_quantity": int(row["minimum_order_quantity"]),
                         "line_feeding_method": row["line_feeding_method"],
+                        "model_file": row.get("model_file") or None,
                     }
                     for row in reader
                 ]

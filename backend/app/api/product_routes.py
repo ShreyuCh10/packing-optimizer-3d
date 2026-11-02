@@ -1,8 +1,13 @@
+import os
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from app.db import get_all_products, get_product_by_name, get_product_by_id
+from app.services.mesh_service import get_product_mesh_glb
 
 router = APIRouter(prefix="/products", tags=["Products"])
+
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @router.get("", summary="List all products from SQLite database")
@@ -61,3 +66,60 @@ def get_product(part_identifier: str):
         raise HTTPException(status_code=404, detail=f"Product '{part_identifier}' not found in database.")
 
     return product
+
+
+@router.get("/{part_identifier}/mesh", summary="Get 3D mesh GLB for frontend rendering")
+def get_product_mesh(part_identifier: str):
+    """Serve a GLB 3D mesh generated or converted by Python's trimesh for WebGL/Three.js rendering."""
+    product = None
+
+    if part_identifier.isdigit():
+        product = get_product_by_id(int(part_identifier))
+
+    if not product:
+        product = get_product_by_name(part_identifier)
+
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{part_identifier}' not found in database.")
+
+    try:
+        glb_bytes, is_cad, filename = get_product_mesh_glb(product)
+        headers = {
+            "Content-Disposition": f'inline; filename="{os.path.splitext(filename)[0]}.glb"',
+            "X-Is-Cad-Model": "true" if is_cad else "false",
+            "X-Mesh-Source": "step-cad" if is_cad else "trimesh-procedural",
+            "Access-Control-Expose-Headers": "X-Is-Cad-Model, X-Mesh-Source",
+        }
+        return Response(content=glb_bytes, media_type="model/gltf-binary", headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate 3D mesh with trimesh: {e}")
+
+
+@router.get("/{part_identifier}/model", summary="Download/serve 3D CAD model file")
+def get_product_model(part_identifier: str):
+    """Retrieve and serve the raw 3D model file (e.g. .STEP) for a product if available."""
+    product = None
+
+    if part_identifier.isdigit():
+        product = get_product_by_id(int(part_identifier))
+
+    if not product:
+        product = get_product_by_name(part_identifier)
+
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{part_identifier}' not found in database.")
+
+    model_file = product.get("model_file")
+    if not model_file:
+        raise HTTPException(status_code=404, detail=f"No 3D CAD model associated with '{product.get('part_name')}'.")
+
+    # Resolve file path
+    file_path = os.path.join(BACKEND_DIR, "data", model_file)
+    if not os.path.exists(file_path):
+        file_path = os.path.join(BACKEND_DIR, "data", "models", os.path.basename(model_file))
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"3D Model file '{model_file}' not found on server disk.")
+
+    filename = os.path.basename(file_path)
+    return FileResponse(path=file_path, filename=filename, media_type="application/octet-stream")

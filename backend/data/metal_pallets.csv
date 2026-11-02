@@ -1,0 +1,6 @@
+metal_pallet,outer_length_mm,outer_width_mm,outer_height_mm,inner_length_mm,inner_width_mm,inner_height_mm,empty_weight_kg
+Metal Pallet 1,1200,800,150,1160,760,100,28
+Metal Pallet 2,1200,1000,150,1160,960,100,34
+Metal Pallet 3,1200,1200,160,1160,1160,110,40
+Metal Pallet 4,1300,1100,160,1260,1060,110,42
+Metal Pallet 5,1500,1200,170,1460,1160,120,55

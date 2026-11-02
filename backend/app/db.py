@@ -36,13 +36,22 @@ def init_db(db_path: Optional[str] = None) -> None:
                     per_day_requirement INTEGER NOT NULL,
                     minimum_order_quantity INTEGER NOT NULL,
                     line_feeding_method TEXT NOT NULL,
+                    model_file TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # Create alias view 'prodcuts' to handle spelling variations
+            # Ensure model_file column exists if table was created previously without it
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(products)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "model_file" not in cols:
+                conn.execute("ALTER TABLE products ADD COLUMN model_file TEXT")
+
+            # Recreate alias view 'prodcuts' to keep columns and spelling variations in sync
+            conn.execute("DROP VIEW IF EXISTS prodcuts")
             conn.execute("""
-                CREATE VIEW IF NOT EXISTS prodcuts AS SELECT * FROM products
+                CREATE VIEW prodcuts AS SELECT * FROM products
             """)
     finally:
         conn.close()
@@ -82,5 +91,3 @@ def get_product_by_id(product_id: int, db_path: Optional[str] = None) -> Optiona
         return dict(row) if row else None
     finally:
         conn.close()
-
-

@@ -1,0 +1,6 @@
+metal_stillage,outer_length_mm,outer_width_mm,outer_height_mm,inner_length_mm,inner_width_mm,inner_height_mm,empty_weight_kg
+Metal Stillage 1,1200,800,800,1100,700,740,65
+Metal Stillage 2,1200,1000,800,1100,900,740,80
+Metal Stillage 3,1200,1000,1000,1100,900,940,95
+Metal Stillage 4,1300,1100,1000,1200,1000,940,115
+Metal Stillage 5,1300,1100,1200,1200,1000,1140,135

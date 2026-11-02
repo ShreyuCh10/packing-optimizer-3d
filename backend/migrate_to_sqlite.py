@@ -62,8 +62,9 @@ def migrate_csv_to_sqlite(csv_path: str, db_path: str, clean: bool = False) -> i
                         domestic_or_international,
                         per_day_requirement,
                         minimum_order_quantity,
-                        line_feeding_method
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        line_feeding_method,
+                        model_file
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(part_name) DO UPDATE SET
                         part_length = excluded.part_length,
                         part_breadth = excluded.part_breadth,
@@ -74,10 +75,12 @@ def migrate_csv_to_sqlite(csv_path: str, db_path: str, clean: bool = False) -> i
                         domestic_or_international = excluded.domestic_or_international,
                         per_day_requirement = excluded.per_day_requirement,
                         minimum_order_quantity = excluded.minimum_order_quantity,
-                        line_feeding_method = excluded.line_feeding_method
+                        line_feeding_method = excluded.line_feeding_method,
+                        model_file = excluded.model_file
                 """
 
                 for row in reader:
+                    model_file = row.get("model_file", "").strip() or None
                     conn.execute(sql, (
                         row["part_name"].strip(),
                         float(row["part_length"]),
@@ -90,6 +93,7 @@ def migrate_csv_to_sqlite(csv_path: str, db_path: str, clean: bool = False) -> i
                         int(row["per_day_requirement"]),
                         int(row["minimum_order_quantity"]),
                         row["line_feeding_method"].strip(),
+                        model_file,
                     ))
                     count += 1
 
@@ -104,12 +108,17 @@ def migrate_csv_to_sqlite(csv_path: str, db_path: str, clean: bool = False) -> i
             cursor.execute("SELECT COUNT(*) FROM prodcuts")
             total_alias = cursor.fetchone()[0]
 
-            cursor.execute("SELECT * FROM prodcuts LIMIT 1")
-            sample = dict(cursor.fetchone())
+            cursor.execute("SELECT COUNT(*) FROM products WHERE model_file IS NOT NULL")
+            total_with_models = cursor.fetchone()[0]
+
+            cursor.execute("SELECT * FROM products WHERE model_file IS NOT NULL LIMIT 2")
+            model_samples = [dict(r) for r in cursor.fetchall()]
 
         print(f"[OK] Verification Check: Table 'products' has {total_products} records.")
         print(f"[OK] Alias Check: View 'prodcuts' has {total_alias} records.")
-        print(f"[OK] Sample Record: {sample['part_name']} ({sample['part_length']}x{sample['part_breadth']}x{sample['part_height']} mm, {sample['part_weight']} kg, {sample['part_type']})")
+        print(f"[OK] 3D Models Check: {total_with_models} products have associated 3D models.")
+        for s in model_samples:
+            print(f"     -> {s['part_name']}: {s['model_file']} ({s['part_length']}x{s['part_breadth']}x{s['part_height']} mm)")
         print(f"[OK] Database ready at: {os.path.abspath(db_path)} ({os.path.getsize(db_path)} bytes)")
 
         return count
@@ -133,4 +142,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
