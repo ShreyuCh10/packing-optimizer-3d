@@ -17,11 +17,11 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: Optional[str] = None) -> None:
-    """Initialize database tables and views."""
+    """Initialize database tables and views for products, packages, pallets, stillages, and trucks."""
     conn = get_db_connection(db_path)
     try:
         with conn:
-            # Create primary 'products' table
+            # 1. Primary 'products' table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS products (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +52,92 @@ def init_db(db_path: Optional[str] = None) -> None:
             conn.execute("DROP VIEW IF EXISTS prodcuts")
             conn.execute("""
                 CREATE VIEW prodcuts AS SELECT * FROM products
+            """)
+
+            # 2. 'packages' table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS packages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package TEXT NOT NULL UNIQUE,
+                    outer_length_mm REAL NOT NULL,
+                    outer_width_mm REAL NOT NULL,
+                    outer_height_mm REAL NOT NULL,
+                    inner_length_mm REAL NOT NULL,
+                    inner_width_mm REAL NOT NULL,
+                    inner_height_mm REAL NOT NULL,
+                    empty_weight_kg REAL NOT NULL,
+                    part_weight_kg REAL NOT NULL,
+                    total_weight_kg REAL NOT NULL,
+                    pallet_length_mm REAL,
+                    pallet_width_mm REAL,
+                    pallet_height_mm REAL,
+                    bins_per_row INTEGER,
+                    bins_per_column INTEGER,
+                    layers_per_pallet INTEGER,
+                    bins_per_pallet INTEGER,
+                    stack_height_mm REAL,
+                    pallet_load_weight_kg REAL,
+                    inventory INTEGER DEFAULT 25,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 3. 'base_pallets' table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS base_pallets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    base_pallet TEXT NOT NULL UNIQUE,
+                    outer_length_mm REAL NOT NULL,
+                    outer_width_mm REAL NOT NULL,
+                    outer_height_mm REAL NOT NULL,
+                    empty_weight_kg REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 4. 'metal_pallets' table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS metal_pallets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metal_pallet TEXT NOT NULL UNIQUE,
+                    outer_length_mm REAL NOT NULL,
+                    outer_width_mm REAL NOT NULL,
+                    outer_height_mm REAL NOT NULL,
+                    inner_length_mm REAL NOT NULL,
+                    inner_width_mm REAL NOT NULL,
+                    inner_height_mm REAL NOT NULL,
+                    empty_weight_kg REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 5. 'metal_stillages' table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS metal_stillages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metal_stillage TEXT NOT NULL UNIQUE,
+                    outer_length_mm REAL NOT NULL,
+                    outer_width_mm REAL NOT NULL,
+                    outer_height_mm REAL NOT NULL,
+                    inner_length_mm REAL NOT NULL,
+                    inner_width_mm REAL NOT NULL,
+                    inner_height_mm REAL NOT NULL,
+                    empty_weight_kg REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 6. 'trucks' table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS trucks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    truck TEXT NOT NULL UNIQUE,
+                    inner_length_mm REAL NOT NULL,
+                    inner_width_mm REAL NOT NULL,
+                    inner_height_mm REAL NOT NULL,
+                    capacity_kg REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             """)
     finally:
         conn.close()
@@ -91,3 +177,209 @@ def get_product_by_id(product_id: int, db_path: Optional[str] = None) -> Optiona
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def get_all_packages(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query all packages from SQLite database."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM packages ORDER BY id ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_all_base_pallets(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query all base pallets from SQLite database."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM base_pallets ORDER BY id ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_all_metal_pallets(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query all metal pallets from SQLite database."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM metal_pallets ORDER BY id ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_all_metal_stillages(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query all metal stillages from SQLite database."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM metal_stillages ORDER BY id ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_all_trucks(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query all trucks from SQLite database."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trucks ORDER BY id ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_unified_packaging(category: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query and return unified packaging units (excluding trucks).
+
+    Supports filtering by category: 'carton', 'base_pallet', 'metal_pallet', 'metal_stillage', or None/'all'.
+    """
+    items: List[Dict[str, Any]] = []
+    cat_lower = (category or "").lower().strip()
+
+    # 1. Cartons (table: packages)
+    if not cat_lower or cat_lower in ("all", "carton", "cartons", "box", "boxes"):
+        cartons = get_all_packages(db_path)
+        for c in cartons:
+            item = dict(c)
+            item["category"] = "carton"
+            item["category_label"] = "Carton Box"
+            item["inventory"] = item.get("inventory", 25)
+            items.append(item)
+
+    # 2. Base Pallets (table: base_pallets)
+    if not cat_lower or cat_lower in ("all", "base_pallet", "base_pallets", "pallets"):
+        pallets = get_all_base_pallets(db_path)
+        for p in pallets:
+            item = {
+                "id": p.get("id"),
+                "package": p.get("base_pallet"),
+                "category": "base_pallet",
+                "category_label": "Base Pallet",
+                "outer_length_mm": p.get("outer_length_mm"),
+                "outer_width_mm": p.get("outer_width_mm"),
+                "outer_height_mm": p.get("outer_height_mm"),
+                "inner_length_mm": None,
+                "inner_width_mm": None,
+                "inner_height_mm": None,
+                "empty_weight_kg": p.get("empty_weight_kg"),
+                "part_weight_kg": None,
+                "total_weight_kg": p.get("empty_weight_kg"),
+                "pallet_length_mm": p.get("outer_length_mm"),
+                "pallet_width_mm": p.get("outer_width_mm"),
+                "pallet_height_mm": p.get("outer_height_mm"),
+                "bins_per_row": None,
+                "bins_per_column": None,
+                "layers_per_pallet": None,
+                "bins_per_pallet": None,
+                "stack_height_mm": p.get("outer_height_mm"),
+                "pallet_load_weight_kg": None,
+                "inventory": 25,
+                "created_at": p.get("created_at"),
+            }
+            items.append(item)
+
+    # 3. Metal Pallets (table: metal_pallets)
+    if not cat_lower or cat_lower in ("all", "metal_pallet", "metal_pallets"):
+        mpallets = get_all_metal_pallets(db_path)
+        for mp in mpallets:
+            item = {
+                "id": mp.get("id"),
+                "package": mp.get("metal_pallet"),
+                "category": "metal_pallet",
+                "category_label": "Metal Pallet",
+                "outer_length_mm": mp.get("outer_length_mm"),
+                "outer_width_mm": mp.get("outer_width_mm"),
+                "outer_height_mm": mp.get("outer_height_mm"),
+                "inner_length_mm": mp.get("inner_length_mm"),
+                "inner_width_mm": mp.get("inner_width_mm"),
+                "inner_height_mm": mp.get("inner_height_mm"),
+                "empty_weight_kg": mp.get("empty_weight_kg"),
+                "part_weight_kg": None,
+                "total_weight_kg": mp.get("empty_weight_kg"),
+                "pallet_length_mm": mp.get("outer_length_mm"),
+                "pallet_width_mm": mp.get("outer_width_mm"),
+                "pallet_height_mm": mp.get("outer_height_mm"),
+                "bins_per_row": None,
+                "bins_per_column": None,
+                "layers_per_pallet": None,
+                "bins_per_pallet": None,
+                "stack_height_mm": mp.get("outer_height_mm"),
+                "pallet_load_weight_kg": None,
+                "inventory": 25,
+                "created_at": mp.get("created_at"),
+            }
+            items.append(item)
+
+    # 4. Metal Stillages (table: metal_stillages)
+    if not cat_lower or cat_lower in ("all", "metal_stillage", "metal_stillages", "stillages"):
+        stillages = get_all_metal_stillages(db_path)
+        for st in stillages:
+            item = {
+                "id": st.get("id"),
+                "package": st.get("metal_stillage"),
+                "category": "metal_stillage",
+                "category_label": "Metal Stillage",
+                "outer_length_mm": st.get("outer_length_mm"),
+                "outer_width_mm": st.get("outer_width_mm"),
+                "outer_height_mm": st.get("outer_height_mm"),
+                "inner_length_mm": st.get("inner_length_mm"),
+                "inner_width_mm": st.get("inner_width_mm"),
+                "inner_height_mm": st.get("inner_height_mm"),
+                "empty_weight_kg": st.get("empty_weight_kg"),
+                "part_weight_kg": None,
+                "total_weight_kg": st.get("empty_weight_kg"),
+                "pallet_length_mm": st.get("outer_length_mm"),
+                "pallet_width_mm": st.get("outer_width_mm"),
+                "pallet_height_mm": st.get("outer_height_mm"),
+                "bins_per_row": None,
+                "bins_per_column": None,
+                "layers_per_pallet": None,
+                "bins_per_pallet": None,
+                "stack_height_mm": st.get("outer_height_mm"),
+                "pallet_load_weight_kg": None,
+                "inventory": 25,
+                "created_at": st.get("created_at"),
+            }
+            items.append(item)
+
+    return items
+
+
+def get_packaging_item_by_identifier(identifier: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single packaging item by ID or name across cartons, pallets, and stillages."""
+    clean_id = str(identifier).strip()
+    all_items = get_unified_packaging(category="all", db_path=db_path)
+
+    # Check by exact name match first
+    for item in all_items:
+        if item.get("package", "").lower() == clean_id.lower():
+            return item
+
+    # Check by numeric ID match (cartons default if ambiguous)
+    if clean_id.isdigit():
+        target_id = int(clean_id)
+        for item in all_items:
+            if item.get("id") == target_id and item.get("category") == "carton":
+                return item
+        for item in all_items:
+            if item.get("id") == target_id:
+                return item
+
+    # Check if prefixed like 'carton-1' or 'Package 1'
+    for item in all_items:
+        if f"{item.get('category')}-{item.get('id')}" == clean_id.lower():
+            return item
+
+    return None
+

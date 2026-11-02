@@ -173,3 +173,36 @@ def get_product_mesh_glb(product: Dict[str, Any]) -> Tuple[bytes, bool, str]:
         part_type=str(product.get("part_type", "Standard")),
     )
     return glb, False, f"{product.get('part_name', 'product')}.glb"
+
+
+def generate_package_mesh(package: Dict[str, Any]) -> Tuple[bytes, str]:
+    """Generate a procedural 3D container mesh for a packaging carton, pallet, or stillage.
+
+    Returns:
+        (glb_bytes, filename)
+    """
+    category = str(package.get("category", "carton")).lower()
+    name = str(package.get("package", "Package"))
+    name_lower = name.lower()
+
+    lx = max(float(package.get("outer_length_mm") or 300.0), 10.0)
+    ly = max(float(package.get("outer_width_mm") or 200.0), 10.0)
+    lz = max(float(package.get("outer_height_mm") or 100.0), 10.0)
+
+    # Realistic material colors (RGBA)
+    if "stillage" in category or "stillage" in name_lower:
+        color = (130, 145, 160, 255)  # Industrial steel stillage
+    elif "metal" in category or "metal" in name_lower:
+        color = (175, 185, 200, 255)  # Galvanized metal / aluminum pallet
+    elif "base_pallet" in category or "pallet" in name_lower:
+        color = (195, 155, 105, 255)  # Timber wood base pallet
+    else:
+        color = (205, 170, 125, 255)  # Cardboard kraft brown
+
+    mesh = trimesh.creation.box(extents=[lx, ly, lz])
+    mesh.visual.vertex_colors = np.full((len(mesh.vertices), 4), color, dtype=np.uint8)
+    mesh.apply_translation(-mesh.centroid)
+
+    glb_bytes = mesh.export(file_type="glb")
+    return glb_bytes, f"{name}.glb"
+

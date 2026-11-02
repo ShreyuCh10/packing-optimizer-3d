@@ -289,13 +289,13 @@ def query_candidate_packages(
                     col_names = [r[1] for r in col_info]
 
                     # Auto-detect column mappings
-                    len_col = _detect_column(col_names, ["length", "internal_length", "length_mm", "internal_length_mm", "l"])
-                    wid_col = _detect_column(col_names, ["width", "breadth", "internal_width", "width_mm", "internal_breadth_mm", "w"])
-                    hei_col = _detect_column(col_names, ["height", "internal_height", "height_mm", "internal_height_mm", "h"])
-                    wt_col = _detect_column(col_names, ["max_weight_capacity", "max_weight", "max_weight_kg", "capacity_kg", "weight_capacity"])
+                    len_col = _detect_column(col_names, ["inner_length_mm", "internal_length", "internal_length_mm", "length_mm", "length", "outer_length_mm", "l"])
+                    wid_col = _detect_column(col_names, ["inner_width_mm", "internal_width", "internal_width_mm", "width_mm", "width", "breadth", "outer_width_mm", "w"])
+                    hei_col = _detect_column(col_names, ["inner_height_mm", "internal_height", "internal_height_mm", "height_mm", "height", "outer_height_mm", "h"])
+                    wt_col = _detect_column(col_names, ["part_weight_kg", "total_weight_kg", "max_weight_capacity", "max_weight", "max_weight_kg", "capacity_kg", "weight_capacity"])
                     inv_col = _detect_column(col_names, ["inventory", "inventory_count", "stock_quantity", "quantity", "stock", "qty"])
-                    code_col = _detect_column(col_names, ["package_code", "code", "package_id", "sku", "name", "id"])
-                    name_col = _detect_column(col_names, ["name", "package_name", "description", "title", "package_code"])
+                    code_col = _detect_column(col_names, ["package", "package_code", "code", "package_id", "sku", "name", "id"])
+                    name_col = _detect_column(col_names, ["package", "name", "package_name", "description", "title", "package_code"])
 
                     # Fetch all package rows from table
                     cursor.execute("SELECT * FROM packages")
