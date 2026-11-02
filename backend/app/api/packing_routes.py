@@ -128,3 +128,13 @@ def optimize_packing_containers(req: OptimizeRequest):
         opt_result["best_option"]["scene_3d"] = generate_scene_data(opt_result["best_option"]["packing_result"])
 
     return opt_result
+
+
+@router.post("/agent", summary="Run Packing Optimizer Agent with Extreme Point Analysis")
+def run_packing_agent_endpoint(req: Dict[str, Any]):
+    """Run the deterministic Packing Optimizer Agent using 3D Extreme Point analysis."""
+    from app.agents.packing_optimizer import run_packing_optimizer
+    try:
+        return run_packing_optimizer(req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Packing optimizer agent failed: {str(e)}")

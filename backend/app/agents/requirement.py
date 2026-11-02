@@ -43,32 +43,35 @@ class RequirementState(TypedDict, total=False):
 
 
 REQUIREMENT_CRITERIA = {
-    "yes": "It contains all the requirements (name, description, snp, length, width, height, part type/material, weight)",
-    "no": "It does not contain all requirements or lacks sufficient part specifications",
+    "yes": "Contains physical dimensions (length, width, height) to pack the item",
+    "no": "Lacks dimensions, vague part description, or needs user clarification",
 }
 
-REQUIREMENT_INSTRUCTIONS = """Does it contain all requirements?
-Requirements:
-{
-    name: str = The name of the requirement
-    description: str = A detailed description of the requirement
-    snp: str = The SNP associated with the requirement
-    part_length: float = The length of the part associated with the requirement
-    part_width: float = The width of the part associated with the requirement
-    part_height: float = The height of the part associated with the requirement
-    part_type: str = The material the part is made of
-    part_weight: float = The weight of the part associated with the requirement
-    extra: dict = Any additional information related to the requirement
-}"""
+REQUIREMENT_INSTRUCTIONS = """Does this text contain explicit 3D dimensions (length, width, height or numeric dimensions like 140x90x60mm) to calculate packaging?"""
 
 
 def _evaluate_with_laya_or_fallback(requirements_text: str) -> Literal["extract_requirements", "HITL"]:
-    """Evaluate text completeness using LayaRouter with fallback."""
+    """Evaluate text completeness using physical geometry checks alongside LayaRouter."""
+    text_lower = requirements_text.lower()
+
+    # 1. Deterministic physical geometry validation:
+    # A complete packaging requirement needs 3D dimensions (e.g., 140x90x60mm or explicit length/width/height)
+    # or a catalog reference (e.g. product 1).
+    has_3d_box = bool(re.search(r"\d+(?:\.\d+)?\s*[xX*×]\s*\d+(?:\.\d+)?\s*[xX*×]\s*\d+(?:\.\d+)?", text_lower))
+    has_explicit_dims = bool(
+        re.search(r"\blength\b", text_lower) and re.search(r"\bwidth\b", text_lower) and re.search(r"\bheight\b", text_lower)
+    )
+    has_catalog_ref = bool(re.search(r"\bproduct\s*(?:id)?\s*[:#]?\s*\d+\b", text_lower))
+
+    if has_3d_box or has_explicit_dims or has_catalog_ref:
+        return "extract_requirements"
+
+    # 2. Semantic evaluation with LayaRouter (threshold calibrated to 0.5 to prevent false rejections)
     try:
         router = LayaRouter(
             criteria=REQUIREMENT_CRITERIA,
             instructions=REQUIREMENT_INSTRUCTIONS,
-            confidence_threshold=0.8,
+            confidence_threshold=0.5,
             fallback="no",
         )
         decision = router.invoke(requirements_text)
@@ -76,8 +79,7 @@ def _evaluate_with_laya_or_fallback(requirements_text: str) -> Literal["extract_
             return "extract_requirements"
         return "HITL"
     except Exception:
-        # Graceful heuristic fallback if Laya local weights/network are not available
-        text_lower = requirements_text.lower()
+        # Graceful heuristic fallback if Laya is not available
         has_dims = any(k in text_lower for k in ["length", "width", "height", "dim", "size", "x", "mm", "cm", "in"])
         has_material = any(k in text_lower for k in ["material", "type", "steel", "plastic", "aluminum", "wood", "foam", "metal"])
         has_weight = any(k in text_lower for k in ["weight", "kg", "g", "lbs", "pound"])
@@ -120,19 +122,44 @@ def _fallback_extract(text: str) -> Requirements:
         m = re.search(pattern, text, re.IGNORECASE)
         return float(m.group(1)) if m else default
 
-    nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text)]
-    length = _search_num(r"length\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[0] if len(nums) > 0 else 100.0)
-    width = _search_num(r"width\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[1] if len(nums) > 1 else 100.0)
-    height = _search_num(r"height\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[2] if len(nums) > 2 else 50.0)
-    weight = _search_num(r"weight\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[3] if len(nums) > 3 else 1.0)
+    # 1. 3D Dimensions: Check for compact 3D dimension box (e.g., 140x90x60mm or 140 x 90 x 60 mm)
+    dim_box = re.search(r"(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)", text)
+    if dim_box:
+        length = float(dim_box.group(1))
+        width = float(dim_box.group(2))
+        height = float(dim_box.group(3))
+    else:
+        nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text)]
+        length = _search_num(r"length\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[0] if len(nums) > 0 else 100.0)
+        width = _search_num(r"width\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[1] if len(nums) > 1 else 100.0)
+        height = _search_num(r"height\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[2] if len(nums) > 2 else 50.0)
 
-    part_type_match = re.search(r"(?:material|type)\s*[:=]?\s*([a-zA-Z]+)", text, re.IGNORECASE)
-    part_type = part_type_match.group(1) if part_type_match else "standard"
+    # 2. Weight
+    weight = _search_num(r"weight\s*[:=]?\s*(\d+(?:\.\d+)?)", 0.0)
+    if weight == 0.0:
+        wt_m = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|kilos?|kilograms?|lbs?)\b", text, re.IGNORECASE)
+        weight = float(wt_m.group(1)) if wt_m else 1.0
 
-    snp_match = re.search(r"snp\s*[:=]?\s*(\S+)", text, re.IGNORECASE)
-    snp = snp_match.group(1) if snp_match else "SNP-1"
+    # 3. Material
+    mat_match = re.search(r"\b(steel|aluminum|plastic|glass|metal|brass|iron|wood|rubber|ceramic|copper)\b", text, re.IGNORECASE)
+    part_type = mat_match.group(1).lower() if mat_match else "standard"
 
+    # 4. SNP / Quantity
+    snp_match = re.search(r"\bsnp\s*[:=]?\s*(\d+)", text, re.IGNORECASE)
+    if not snp_match:
+        snp_match = re.search(r"\b(?:snp|quantity|qty|packs?|units?|count)\b\s*[:=]?\s*(\d+)", text, re.IGNORECASE)
+    if not snp_match:
+        snp_match = re.search(r"(?:pack|packaging for|packing for|package for|packages for|carton for|box for|shipping for)\s+(\d+)", text, re.IGNORECASE)
+    if not snp_match:
+        snp_match = re.search(r"\b(\d+)\s+(?:(?:[a-zA-Z]+)\s+)?(?:units|parts|pieces|items|brackets|pins|doors|plates|boxes|housings|bushings|assemblies|modules|heatsinks|clips|ingots|sensors)\b", text, re.IGNORECASE)
+    if not snp_match:
+        snp_match = re.search(r"\b(?:for|pack|ship|box)\s+(\d+)\b", text, re.IGNORECASE)
+    snp = snp_match.group(1).rstrip(".,;:") if snp_match else "SNP-1"
+
+    # 5. Name
     name_match = re.search(r"(?:part|name)\s*[:=]?\s*([a-zA-Z0-9_\- ]+?)(?=\s+(?:length|width|height|weight|material|type|snp|$))", text, re.IGNORECASE)
+    if not name_match:
+        name_match = re.search(r"(?:for|pack)\s+(?:\d+\s+)?([a-zA-Z0-9_\- ]+?)(?=\s+(?:measuring|with|having|dimensions|length|width|height|weight|material|type|$))", text, re.IGNORECASE)
     name = name_match.group(1).strip() if name_match else "Extracted Part"
 
     return Requirements(

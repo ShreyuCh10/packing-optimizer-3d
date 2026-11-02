@@ -1,32 +1,30 @@
 import { useState, useRef, useEffect } from 'react'
-
-interface ChatMessage {
-  id: string
-  sender: 'user' | 'assistant'
-  text: string
-  timestamp?: string
-}
+import type { ChatMessage, WorkflowResult } from '../../types/workflow'
+import { runWorkflow } from '../../services/workflowApi'
+import WorkflowMessageCard from './WorkflowMessageCard'
 
 const QUICK_PROMPTS = [
   {
-    title: 'Find standard package',
-    subtitle: 'Find inventory box for 140x90x60mm steel bracket',
-    prompt: 'Find a suitable inventory package for a steel bracket measuring 140x90x60mm with quantity 4.',
+    title: 'Standard Part Packaging',
+    subtitle: '4 steel brackets measuring 140×90×60mm, 1.2kg',
+    prompt:
+      'Find a suitable inventory package for 4 steel brackets measuring 140x90x60mm with weight 1.2kg each.',
   },
   {
-    title: 'Calculate custom box',
-    subtitle: 'Compute sizing & foam padding for 12 units',
-    prompt: 'Calculate custom box dimensions and recommended padding for 12 units of 180x120x80mm aluminum parts.',
+    title: 'Catalog Product Auto-Lookup',
+    subtitle: 'Micro Terminal Block (Product 1, 64 units)',
+    prompt: 'Lookup product 1 and pack all units according to its catalog SNP.',
   },
   {
-    title: 'Padding recommendations',
-    subtitle: 'Check cushion rules for fragile glass or acrylic',
-    prompt: 'What padding material and clearance thickness are required for high fragility glass components?',
+    title: 'Heavy Industrial Stillage',
+    subtitle: 'Solid Counterweight Ingot (Product 45, 38kg payload)',
+    prompt:
+      'Pack product 45 (Solid Counterweight Ingot). This part is heavy and will require industrial packaging.',
   },
   {
-    title: '3D Container optimization',
-    subtitle: 'Check loading volume efficiency and waste',
-    prompt: 'How can I maximize carton volume utilization when shipping multiple mixed-size items?',
+    title: 'Ambiguous Spec (Test HITL)',
+    subtitle: 'Missing dimensions triggers Human-In-The-Loop',
+    prompt: 'I have some metal brackets that need packaging for shipment.',
   },
 ]
 
@@ -34,6 +32,7 @@ export default function ChatbotView() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [currentRunningStage, setCurrentRunningStage] = useState<string>('requirement_gathering')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -53,14 +52,36 @@ export default function ChatbotView() {
     }
   }, [inputValue])
 
-  const handleSendMessage = (textToSend?: string) => {
+  // Animated pipeline progress simulation while awaiting backend response
+  useEffect(() => {
+    if (!isTyping) {
+      setCurrentRunningStage('requirement_gathering')
+      return
+    }
+
+    const t1 = setTimeout(() => {
+      setCurrentRunningStage('retrieval_gathering')
+    }, 700)
+
+    const t2 = setTimeout(() => {
+      setCurrentRunningStage('packing_optimization')
+    }, 1500)
+
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [isTyping])
+
+  const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend ?? inputValue).trim()
-    if (!text) return
+    if (!text || isTyping) return
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       sender: 'user',
       text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
 
     setMessages((prev) => [...prev, userMessage])
@@ -70,16 +91,41 @@ export default function ChatbotView() {
     }
     setIsTyping(true)
 
-    // Simulate mock assistant response (standalone UI preview)
-    setTimeout(() => {
-      const mockReply: ChatMessage = {
+    try {
+      // Check if user is referencing a product by ID directly (e.g. "product 1" or "product id 1")
+      let workflowPayload: any = text
+      const prodMatch = text.match(/\bproduct\s*(?:id)?\s*[:#]?\s*(\d+)\b/i)
+      if (prodMatch) {
+        workflowPayload = {
+          product_id: parseInt(prodMatch[1], 10),
+          user_input: text,
+        }
+      }
+
+      const result: WorkflowResult = await runWorkflow(workflowPayload)
+
+      const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         sender: 'assistant',
-        text: `I received your packaging requirement: "${text}".\n\nThe backend Requirement & Retrieval agents are ready to be connected to parse geometric metrics, evaluate SNP, and return matching packages.`,
+        text: result.summary || 'Unified packaging workflow completed.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        workflowResult: result,
       }
-      setMessages((prev) => [...prev, mockReply])
+
+      setMessages((prev) => [...prev, assistantMessage])
+    } catch (err: any) {
+      console.error('Unified workflow API call failed:', err)
+      const errorMessage: ChatMessage = {
+        id: `assistant-err-${Date.now()}`,
+        sender: 'assistant',
+        text: `Error executing workflow: ${err.message || 'Unknown network or backend failure'}. Please verify that the FastAPI backend server is running at http://localhost:8000.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isError: true,
+      }
+      setMessages((prev) => [...prev, errorMessage])
+    } finally {
       setIsTyping(false)
-    }, 600)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -95,17 +141,21 @@ export default function ChatbotView() {
     setIsTyping(false)
   }
 
+  const handleApplyPrompt = (promptText: string) => {
+    handleSendMessage(promptText)
+  }
+
   return (
     <div className="flex-1 flex flex-col h-full bg-white relative">
-      {/* Top Bar (ChatGPT Style: clean, minimal, non-intrusive) */}
+      {/* Top Bar */}
       <div className="h-12 border-b border-slate-100 px-4 flex items-center justify-between shrink-0 bg-white z-10">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-slate-800 text-sm">
-            Packing Assistant
+            Packaging Workflow Assistant
           </span>
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 bg-sky-50 border border-sky-200/80 px-2 py-0.5 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
-            Standalone Preview
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            3-Agent Pipeline Connected
           </span>
         </div>
 
@@ -127,7 +177,7 @@ export default function ChatbotView() {
       {/* Main Messages & Center Stage */}
       <div className="flex-1 overflow-y-auto px-4 py-4 md:py-6">
         {messages.length === 0 ? (
-          /* Empty / Welcome State (ChatGPT style) */
+          /* Empty / Welcome State */
           <div className="h-full flex flex-col justify-center items-center max-w-2xl mx-auto text-center px-4">
             <div className="w-12 h-12 rounded-full bg-sky-50 text-sky-700 border border-sky-200/80 flex items-center justify-center font-bold text-lg mb-4">
               <svg className="w-6 h-6 stroke-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
@@ -138,10 +188,10 @@ export default function ChatbotView() {
               What are you packing today?
             </h1>
             <p className="text-sm text-slate-500 mb-8 max-w-md">
-              Ask questions about custom box dimensions, padding rules, or evaluate candidate packages from inventory.
+              Chat with our autonomous 3-agent pipeline: gathers specifications, evaluates real SQLite packaging inventory, and performs 3D Extreme Point packing.
             </p>
 
-            {/* Prompt Suggestion Cards (2x2 grid) with Subtle Hover */}
+            {/* Prompt Suggestion Cards (2x2 grid) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left">
               {QUICK_PROMPTS.map((item) => (
                 <button
@@ -161,47 +211,114 @@ export default function ChatbotView() {
             </div>
           </div>
         ) : (
-          /* Messages Stream (ChatGPT style) */
+          /* Messages Stream */
           <div className="max-w-3xl mx-auto w-full space-y-6 pb-6">
             {messages.map((msg) => {
               const isUser = msg.sender === 'user'
 
               return isUser ? (
-                /* User Message (Right-aligned rounded pill) */
+                /* User Message */
                 <div key={msg.id} className="flex justify-end">
-                  <div className="bg-slate-100 text-slate-900 rounded-3xl px-5 py-3 max-w-[80%] text-sm sm:text-base leading-relaxed whitespace-pre-wrap">
+                  <div className="bg-slate-100 text-slate-900 rounded-3xl px-5 py-3 max-w-[80%] text-sm sm:text-base leading-relaxed whitespace-pre-wrap shadow-2xs">
                     {msg.text}
                   </div>
                 </div>
               ) : (
-                /* Assistant Message (Left-aligned clean block with icon) */
-                <div key={msg.id} className="flex gap-4 items-start">
-                  <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 shadow-2xs">
-                    AI
+                /* Assistant Message */
+                <div key={msg.id} className="flex gap-3 sm:gap-4 items-start">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 shadow-2xs ${
+                      msg.isError
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-sky-600 text-white'
+                    }`}
+                  >
+                    {msg.isError ? '!' : 'AI'}
                   </div>
-                  <div className="flex-1 text-slate-800 text-sm sm:text-base leading-relaxed whitespace-pre-wrap pt-1">
-                    {msg.text}
+
+                  <div className="flex-1 min-w-0">
+                    {msg.workflowResult ? (
+                      <WorkflowMessageCard
+                        result={msg.workflowResult}
+                        onApplyPrompt={handleApplyPrompt}
+                      />
+                    ) : (
+                      <div
+                        className={`text-sm sm:text-base leading-relaxed whitespace-pre-wrap pt-1 ${
+                          msg.isError ? 'text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3' : 'text-slate-800'
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                    )}
                   </div>
                 </div>
               )
             })}
 
-            {/* Assistant Typing Indicator */}
+            {/* Real-time Multi-Agent Progress Indicator */}
             {isTyping && (
-              <div className="flex gap-4 items-center">
+              <div className="flex gap-3 sm:gap-4 items-start animate-fade-in">
                 <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 text-xs font-bold shadow-2xs">
                   AI
                 </div>
-                <div className="flex items-center gap-1.5 py-2">
-                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-                  <span
-                    className="w-2 h-2 rounded-full bg-sky-400 animate-pulse"
-                    style={{ animationDelay: '150ms' }}
-                  />
-                  <span
-                    className="w-2 h-2 rounded-full bg-sky-400 animate-pulse"
-                    style={{ animationDelay: '300ms' }}
-                  />
+                <div className="flex-1 bg-slate-50 border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Executing 3-Agent Workflow
+                    </span>
+                  </div>
+
+                  {/* Visual mini-stepper */}
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <span
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          currentRunningStage === 'requirement_gathering'
+                            ? 'bg-sky-600 text-white animate-pulse'
+                            : 'bg-emerald-500 text-white'
+                        }`}
+                      >
+                        {currentRunningStage === 'requirement_gathering' ? '1' : '✓'}
+                      </span>
+                      <span className={currentRunningStage === 'requirement_gathering' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Stage 1: Requirement Gathering (parsing geometry, SNP & padding rules)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <span
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          currentRunningStage === 'retrieval_gathering'
+                            ? 'bg-sky-600 text-white animate-pulse'
+                            : currentRunningStage === 'packing_optimization'
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-slate-200 text-slate-500'
+                        }`}
+                      >
+                        {currentRunningStage === 'retrieval_gathering' ? '2' : currentRunningStage === 'packing_optimization' ? '✓' : '2'}
+                      </span>
+                      <span className={currentRunningStage === 'retrieval_gathering' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Stage 2: Retrieval Agent (querying SQLite inventory & ranking top containers)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <span
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          currentRunningStage === 'packing_optimization'
+                            ? 'bg-sky-600 text-white animate-pulse'
+                            : 'bg-slate-200 text-slate-500'
+                        }`}
+                      >
+                        3
+                      </span>
+                      <span className={currentRunningStage === 'packing_optimization' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Stage 3: Packing Optimizer (3D Extreme Point placement & Three.js scene)
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -211,7 +328,7 @@ export default function ChatbotView() {
         )}
       </div>
 
-      {/* ChatGPT Style Bottom Input Bar (Centered floating pill dock) */}
+      {/* Bottom Input Dock */}
       <div className="shrink-0 max-w-3xl mx-auto w-full px-4 pb-3 sm:pb-4 pt-1 bg-white">
         <form
           onSubmit={(e) => {
@@ -226,17 +343,18 @@ export default function ChatbotView() {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Packaging Assistant..."
-            className="flex-1 bg-transparent border-0 focus:ring-0 focus:outline-none resize-none text-sm sm:text-base px-3 py-1.5 text-slate-900 placeholder-slate-400 max-h-36 leading-normal"
+            disabled={isTyping}
+            placeholder={isTyping ? 'Pipeline is running...' : 'Describe parts or enter product ID (e.g. "Pack 4 steel brackets 140x90x60mm 1.2kg")...'}
+            className="flex-1 bg-transparent border-0 focus:ring-0 focus:outline-none resize-none text-sm sm:text-base px-3 py-1.5 text-slate-900 placeholder-slate-400 max-h-36 leading-normal disabled:opacity-60"
           />
 
-          {/* Primary Action Circular Send Button (Up Arrow) */}
+          {/* Send Button */}
           <button
             type="submit"
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || isTyping}
             aria-label="Send message"
             className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all duration-150 cursor-pointer ${
-              inputValue.trim()
+              inputValue.trim() && !isTyping
                 ? 'bg-sky-600 text-white hover:bg-sky-700 active:scale-[0.95] shadow-xs'
                 : 'bg-slate-300 text-slate-100 cursor-not-allowed'
             }`}
@@ -254,7 +372,7 @@ export default function ChatbotView() {
         </form>
 
         <p className="text-[11px] text-slate-400 text-center mt-2">
-          Packaging Assistant interface preview. Responses are currently not connected to the live agent backend.
+          Connected to LangGraph Unified Packaging Workflow: Requirement Gathering • SQLite Candidate Retrieval • 3D Extreme Point Optimizer.
         </p>
       </div>
     </div>

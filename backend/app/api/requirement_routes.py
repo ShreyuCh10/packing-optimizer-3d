@@ -90,3 +90,46 @@ def resolve_hitl_clarification(input_data: HITLResolveInput):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"HITL resolution failed: {str(e)}")
+
+
+class RetrievalInput(BaseModel):
+    product_id: Optional[int] = Field(default=None, description="Optional SQLite Product ID to auto-load attributes")
+    name: Optional[str] = Field(default=None, description="Part name")
+    part_length: Optional[float] = Field(default=None, description="Part length in mm")
+    part_width: Optional[float] = Field(default=None, description="Part width in mm")
+    part_height: Optional[float] = Field(default=None, description="Part height in mm")
+    part_weight: Optional[float] = Field(default=None, description="Part weight in kg")
+    part_type: Optional[str] = Field(default=None, description="Material type")
+    snp: Optional[Any] = Field(default=None, description="Standard Number of Packs (SNP)")
+    max_results: Optional[int] = Field(default=5, ge=1, le=20, description="Max packages to return")
+
+
+@router.post("/retrieve", summary="Run Retrieval & Gathering Agent to narrow down useful packages from SQLite")
+def retrieve_packages(input_data: RetrievalInput):
+    """Deterministically calculate physical metrics and query SQLite database tables to narrow down useful packages."""
+    from app.agents.retrieval_gathering import run_retrieval_gathering
+    try:
+        data = input_data.model_dump()
+        max_res = int(data.pop("max_results", 5) or 5)
+        return run_retrieval_gathering(data, max_results=max_res)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Retrieval agent failed: {str(e)}")
+
+
+@router.post("/workflow", summary="Run End-to-End 3-Agent Packaging Workflow")
+def run_workflow_endpoint(input_data: Dict[str, Any]):
+    """Execute the full 3-Agent pipeline: Requirement Gathering -> Retrieval & Gathering -> 3D Packing Optimization."""
+    from app.agents.workflow import run_unified_workflow
+    try:
+        user_in = input_data.get("user_input", input_data)
+        allow_rot = input_data.get("allow_rotation", True)
+        keep_up = input_data.get("keep_upright", False)
+        max_c = input_data.get("max_candidate_packages", 5)
+        return run_unified_workflow(
+            user_input=user_in,
+            allow_rotation=allow_rot,
+            keep_upright=keep_up,
+            max_candidate_packages=max_c,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unified workflow failed: {str(e)}")
