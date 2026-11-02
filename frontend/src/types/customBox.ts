@@ -12,6 +12,7 @@ export interface Product {
   per_day_requirement: number;
   minimum_order_quantity: number;
   line_feeding_method: string;
+  model_file?: string | null;
   created_at?: string;
 }
 

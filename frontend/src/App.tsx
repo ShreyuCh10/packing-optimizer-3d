@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ProductsView from './components/products/ProductsView'
+import PackagesView from './components/packages/PackagesView'
 import ChatbotView from './components/chatbot/ChatbotView'
 
 type PageKey = 'products' | 'packages' | 'optimiser' | 'chatbot'
@@ -155,6 +156,8 @@ export default function App() {
         <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
           {activePage === 'products' ? (
             <ProductsView />
+          ) : activePage === 'packages' ? (
+            <PackagesView />
           ) : (
             <div className="max-w-2xl mx-auto my-12 bg-white border border-slate-200 rounded-lg p-8 sm:p-12 text-center shadow-xs">
               <span className="inline-block px-3 py-1 text-xs font-semibold uppercase tracking-wider text-sky-700 bg-sky-50 border border-sky-200/70 rounded-full mb-4">

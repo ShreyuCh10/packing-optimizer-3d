@@ -29,6 +29,15 @@ export function getMaterialBadgeStyle(material?: string): MaterialBadgeStyle {
     }
   }
 
+  // Wood / Timber / Engineered Wood -> Soft Warm Wood Tone
+  if (m.includes('wood') || m.includes('timber')) {
+    return {
+      bg: 'bg-amber-50',
+      text: 'text-amber-900',
+      border: 'border-amber-300',
+    }
+  }
+
   // Plastics (ABS, Nylon, POM, Polycarbonate, HDPE) -> Soft Teal
   if (
     m.includes('plastic') ||
@@ -87,6 +96,44 @@ export function getMaterialBadgeStyle(material?: string): MaterialBadgeStyle {
     bg: 'bg-slate-100',
     text: 'text-slate-700',
     border: 'border-slate-200',
+  }
+}
+
+/**
+ * Returns soft badge styles for packaging categories (cartons, pallets, stillages).
+ */
+export function getPackageBadgeStyle(category?: string): MaterialBadgeStyle {
+  const c = (category || '').toLowerCase().trim()
+
+  if (c.includes('stillage')) {
+    return {
+      bg: 'bg-sky-50',
+      text: 'text-sky-800',
+      border: 'border-sky-200',
+    }
+  }
+
+  if (c.includes('metal')) {
+    return {
+      bg: 'bg-slate-100',
+      text: 'text-slate-800',
+      border: 'border-slate-300',
+    }
+  }
+
+  if (c.includes('base') || c.includes('pallet')) {
+    return {
+      bg: 'bg-amber-100/60',
+      text: 'text-amber-900',
+      border: 'border-amber-300',
+    }
+  }
+
+  // Carton / default
+  return {
+    bg: 'bg-amber-50',
+    text: 'text-amber-900',
+    border: 'border-amber-200',
   }
 }
 

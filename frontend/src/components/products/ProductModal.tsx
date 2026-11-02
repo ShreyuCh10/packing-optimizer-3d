@@ -1,11 +1,14 @@
 import { useEffect } from 'react'
 import type { Product } from '../../types/customBox'
 import { getMaterialBadgeStyle } from '../../utils/materialBadges'
+import ProductMeshViewer from './ProductMeshViewer'
 
 interface ProductModalProps {
   product: Product | null
   onClose: () => void
 }
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
 export default function ProductModal({ product, onClose }: ProductModalProps) {
   useEffect(() => {
@@ -21,6 +24,7 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
   if (!product) return null
 
   const badgeStyle = getMaterialBadgeStyle(product.part_type)
+  const hasModel = Boolean(product.model_file)
   const volumeCm3 = ((product.part_length * product.part_breadth * product.part_height) / 1000).toFixed(1)
   const volumeLiters = ((product.part_length * product.part_breadth * product.part_height) / 1000000).toFixed(3)
   const totalPackWeight = (product.part_weight * product.standard_no_of_parts).toFixed(2)
@@ -42,7 +46,7 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
         className="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-200 z-10 flex flex-col"
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-20">
           <div>
             <div className="flex items-center gap-2">
               <span
@@ -50,6 +54,11 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
               >
                 {product.part_type}
               </span>
+              {hasModel && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-sky-600 text-white shadow-2xs">
+                  3D CAD (.STEP)
+                </span>
+              )}
               {product.id && (
                 <span className="text-xs text-slate-400">ID #{product.id}</span>
               )}
@@ -76,27 +85,35 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
 
         {/* Modal Body */}
         <div className="p-6 space-y-6">
-          {/* Placeholder for 3D Model / Image - Very Light Blue-Tinted Background */}
-          <div className="h-48 bg-sky-50/65 rounded-lg border border-dashed border-sky-200 flex flex-col items-center justify-center text-sky-700/80 p-4">
-            <svg
-              className="w-12 h-12 mb-2 stroke-sky-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"
-              />
-            </svg>
-            <span className="text-sm font-semibold text-sky-950">
-              3D CAD / Interactive Model Viewer
-            </span>
-            <span className="text-xs text-sky-600/80 mt-1">
-              Image not available
-            </span>
+          {/* Interactive 3D Mesh Viewer powered by Python Trimesh */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Live 3D Mesh Viewer
+              </span>
+
+              {hasModel && (
+                <a
+                  href={`${API_BASE}/products/${product.id ?? encodeURIComponent(product.part_name)}/model`}
+                  download
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-semibold text-sky-700 hover:text-sky-900 bg-sky-50 border border-sky-200 hover:bg-sky-100 px-2.5 py-1 rounded transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  <span>Download .STEP</span>
+                </a>
+              )}
+            </div>
+
+            <ProductMeshViewer
+              productIdOrName={product.id ?? product.part_name}
+              hasCadModel={hasModel}
+              height="h-64 sm:h-72"
+            />
           </div>
 
           {/* Key Metric Highlights */}
@@ -155,6 +172,17 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
                 </dd>
               </div>
 
+              {product.model_file && (
+                <div className="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4 bg-sky-50/30">
+                  <dt className="text-sky-900 font-medium">Associated 3D Model</dt>
+                  <dd className="mt-1 sm:mt-0 sm:col-span-2 text-sky-800 font-mono text-xs flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-white border border-sky-200 font-medium">
+                      {product.model_file}
+                    </span>
+                  </dd>
+                </div>
+              )}
+
               <div className="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
                 <dt className="text-slate-500 font-medium">Supply Scope</dt>
                 <dd className="mt-1 sm:mt-0 sm:col-span-2 text-slate-900">
@@ -202,7 +230,7 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3 sticky bottom-0">
+        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3 sticky bottom-0 z-20">
           <button
             type="button"
             onClick={onClose}

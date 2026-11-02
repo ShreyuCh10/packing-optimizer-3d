@@ -8,6 +8,7 @@ interface ProductCardProps {
 
 export default function ProductCard({ product, onClick }: ProductCardProps) {
   const badgeStyle = getMaterialBadgeStyle(product.part_type)
+  const hasModel = Boolean(product.model_file)
 
   return (
     <div
@@ -18,7 +19,11 @@ export default function ProductCard({ product, onClick }: ProductCardProps) {
       <div className="relative h-44 bg-sky-50/65 border-b border-sky-100/80 flex flex-col items-center justify-center text-sky-600/75 p-4 select-none group-hover:bg-sky-100/60 transition-colors duration-200">
         {/* Placeholder Icon */}
         <svg
-          className="w-10 h-10 mb-2 stroke-sky-400 group-hover:stroke-sky-500 transition-colors"
+          className={`w-10 h-10 mb-2 transition-colors ${
+            hasModel
+              ? 'stroke-sky-600 group-hover:stroke-sky-700'
+              : 'stroke-sky-400 group-hover:stroke-sky-500'
+          }`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -30,11 +35,30 @@ export default function ProductCard({ product, onClick }: ProductCardProps) {
             d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"
           />
         </svg>
-        <span className="text-xs font-medium text-sky-700/80">
-          Image not available
-        </span>
 
-        {/* Soft Colored Material Badge */}
+        {hasModel ? (
+          <div className="text-center">
+            <span className="text-xs font-semibold text-sky-800 block">
+              3D CAD Model Linked
+            </span>
+            <span className="text-[11px] font-mono text-sky-600 mt-0.5 block">
+              {product.model_file?.split('/').pop()}
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs font-medium text-sky-700/80">
+            Image not available
+          </span>
+        )}
+
+        {/* 3D Model Badge (Top Left) if present */}
+        {hasModel && (
+          <span className="absolute top-2.5 left-2.5 text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-600 text-white shadow-2xs">
+            3D CAD (.STEP)
+          </span>
+        )}
+
+        {/* Soft Colored Material Badge (Top Right) */}
         <span
           className={`absolute top-2.5 right-2.5 text-[11px] font-medium px-2 py-0.5 rounded border shadow-2xs capitalize ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}
         >

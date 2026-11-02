@@ -6,7 +6,7 @@ The **3D Packing Optimizer** is an end-to-end intelligent engineering and logist
 1. **AI Requirement Extraction**: Accepts unstructured textual specifications or spec sheets and extracts structured part dimensions, weight, material type, and Standard Pack Quantity (SNP).
 2. **Custom Box Sizing & Multi-Unit Layout**: Calculates custom box sizing, foam padding clearance based on part fragility, 3D multi-unit arrangement grids ($n_x \times n_y \times n_z = \text{SNP}$), tare weights, and carrier shipping constraints.
 3. **3D Spatial Packing Optimization**: Fits multiple parts into standard or custom containers using a 3D corner-point placement heuristic with 6-degree orthogonal rotations, generating scene coordinates ready for WebGL / Three.js 3D rendering.
-4. **Standard Industrial Dataset**: Provides a 50-part benchmark dataset featuring realistic manufacturing parts with wide size and weight variety, specifically shaped as simple 3D geometric primitives.
+4. **Standard Industrial Dataset**: Provides a 51-part benchmark dataset featuring realistic manufacturing parts with wide size and weight variety, specifically shaped as simple 3D geometric primitives.
 
 ---
 
@@ -51,8 +51,13 @@ packing-optimizer-3d/
 │   ├── requirements.txt              # Python dependencies specification
 │   ├── migrate_to_sqlite.py          # Migration script from CSV to SQLite
 │   ├── data/
-│   │   ├── products_dataset.csv      # 50-item benchmark dataset for packing optimization
-│   │   ├── products.db               # SQLite database containing 'products' & 'prodcuts'
+│   │   ├── products_dataset.csv      # 51-item benchmark parts dataset
+│   │   ├── packages.csv              # 41 packaging cartons with inner/outer dimensions & pallet stacking
+│   │   ├── base_pallets.csv          # 3 standard base warehouse pallets
+│   │   ├── metal_pallets.csv         # 5 heavy-duty metal pallets
+│   │   ├── metal_stillages.csv       # 5 industrial metal transport stillages
+│   │   ├── trucks.csv                # 5 freight transport trucks with capacity & internal dimensions
+│   │   ├── products.db               # SQLite database containing all 6 tables & 'prodcuts' view
 │   │   ├── materials.json            # Packaging box materials (corrugated, plastic, wood)
 │   │   └── padding_rules.json        # Fragility and cushion thickness rules by material
 │   └── app/
@@ -66,6 +71,8 @@ packing-optimizer-3d/
 │       │   └── retrieval_gathering.py# Deterministic metrics & package candidate retrieval agent
 │       ├── api/
 │       │   ├── __init__.py           # Route collection exports
+│       │   ├── product_routes.py     # Product catalog & 3D mesh endpoints (/api/products)
+│       │   ├── package_routes.py     # Package inventory & 3D mesh endpoints (/api/packages)
 │       │   ├── requirement_routes.py # AI agent endpoints (/api/requirements)
 │       │   ├── custom_box_routes.py  # Sizing & product endpoints (/api/custom-box)
 │       │   └── packing_routes.py     # 3D bin packing endpoints (/api/packing)
@@ -147,7 +154,7 @@ packing-optimizer-3d/
 ### Phase 6: Product Benchmark Dataset (`data/products_dataset.csv`)
 - **Dataset Creation**:
   - Created [`backend/data/products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products_dataset.csv).
-  - Includes **50 realistic components** designed as simple 3D geometric primitives (boxes, cylinders, plates, L/U-extrusions) for easy CAD / Three.js modeling.
+  - Includes **51 realistic components** designed as simple 3D geometric primitives (boxes, cylinders, plates, L/U-extrusions) for easy CAD / Three.js modeling.
   - **Dynamic Range**:
     - Length: $25\text{ mm}$ to $1150\text{ mm}$ ($\sim 46\times$ range)
     - Height: $4\text{ mm}$ to $540\text{ mm}$ ($\sim 135\times$ range)
@@ -183,7 +190,7 @@ packing-optimizer-3d/
 | `/api/requirements/hitl/resolve` | `POST` | `{"original_requirement": "...", "additional_info": "..."}` | Appends user clarifications and re-runs the agent |
 | `/api/products` | `GET` | Optional query params: `search`, `part_type`, `limit`, `offset` | Direct SQLite product catalog search and list |
 | `/api/products/{id_or_name}` | `GET` | None | Retrieve single product by numeric ID or part name |
-| `/api/custom-box/products` | `GET` | None | Returns the 50 products from SQLite DB / CSV |
+| `/api/custom-box/products` | `GET` | None | Returns the 51 products from SQLite DB / CSV |
 | `/api/custom-box/products/{part_name}` | `GET` | None | Returns a single product by part name |
 | `/api/custom-box/materials` | `GET` | None | Returns list of supported box materials |
 | `/api/custom-box/padding-rules` | `GET` | None | Returns padding thickness and cushion rules |
@@ -196,37 +203,60 @@ packing-optimizer-3d/
 
 ## 6. Database Migration Guide (CSV to SQLite)
 
-The migration script [`backend/migrate_to_sqlite.py`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/migrate_to_sqlite.py) transfers the benchmark dataset ([`data/products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products_dataset.csv)) into a local, high-performance SQLite database ([`backend/data/products.db`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products.db)).
+The unified migration script [`backend/migrate_to_sqlite.py`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/migrate_to_sqlite.py) transfers all industrial datasets from CSV files into a local, high-performance SQLite database ([`backend/data/products.db`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products.db)). Each dataset has its own dedicated table with full typing, autoincrement IDs, constraints, and timestamps:
 
-### Quick Migration Command
+| Dataset CSV | Target SQLite Table | Rows | Purpose / Role in System |
+|---|---|---|---|
+| [`products_dataset.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/products_dataset.csv) | `products` *(alias `prodcuts`)* | 51 | Benchmark catalog of diverse manufacturing parts with 3D models |
+| [`packages.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/packages.csv) | `packages` | 41 | Standard packaging cartons with inner/outer bounds, pallet stacking & weight limits |
+| [`base_pallets.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/base_pallets.csv) | `base_pallets` | 3 | Standard warehouse base pallets |
+| [`metal_pallets.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/metal_pallets.csv) | `metal_pallets` | 5 | Reinforced metal pallets with inner/outer dimensions |
+| [`metal_stillages.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/metal_stillages.csv) | `metal_stillages` | 5 | Heavy industrial metal cages/stillages |
+| [`trucks.csv`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/data/trucks.csv) | `trucks` | 5 | Commercial transport trucks with volumetric capacity and weight limits |
+
+---
+
+### Quick Migration Commands
 
 From your workspace root or the `backend` folder:
 
 ```powershell
 cd backend
-.\.venv\Scripts\Activate.ps1
 python migrate_to_sqlite.py
 ```
+
+#### Re-migrate cleanly (drops/truncates existing records):
+```powershell
+python migrate_to_sqlite.py --clean
+```
+
+#### Migrate a single specific table:
+```powershell
+python migrate_to_sqlite.py --table packages
+python migrate_to_sqlite.py --table products
+python migrate_to_sqlite.py --table trucks
+```
+
+---
 
 ### Command-Line Options
 
 | Option | Default | Description |
 |---|---|---|
-| `--csv <path>` | `data/products_dataset.csv` | Path to the source CSV file |
+| *(no arguments)* | All datasets | Automatically iterates through all 6 CSVs and imports them |
+| `--clean` | `False` | Truncates and resets table records before re-importing |
+| `--table <name>` | `None` (all) | Target a single table: `products`, `packages`, `base_pallets`, `metal_pallets`, `metal_stillages`, or `trucks` |
+| `--csv <path>` | Auto-detected | Override path to a specific input CSV file (used with `--table`) |
 | `--db <path>` | `data/products.db` | Path to the target SQLite database file |
-| `--clean` | `False` | Truncates table and resets autoincrement ID sequence before migration |
 
-#### Clean Re-migration Example:
-```powershell
-python migrate_to_sqlite.py --clean
-```
+---
 
-### Table & View Architecture
+### Database Schemas
 
-The migration script automatically executes the following DDL:
+The migration script and [`backend/app/db.py`](file:///c:/Users/ManuSebastian/Downloads/packing-optimizer-3d/backend/app/db.py) initialize the following schemas:
 
 ```sql
--- Primary table
+-- 1. Products table & view
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     part_name TEXT NOT NULL UNIQUE,
@@ -240,18 +270,96 @@ CREATE TABLE IF NOT EXISTS products (
     per_day_requirement INTEGER NOT NULL,
     minimum_order_quantity INTEGER NOT NULL,
     line_feeding_method TEXT NOT NULL,
+    model_file TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE VIEW IF NOT EXISTS prodcuts AS SELECT * FROM products;
+
+-- 2. Packages table (used by Retrieval & Gathering Agent)
+CREATE TABLE IF NOT EXISTS packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package TEXT NOT NULL UNIQUE,
+    outer_length_mm REAL NOT NULL,
+    outer_width_mm REAL NOT NULL,
+    outer_height_mm REAL NOT NULL,
+    inner_length_mm REAL NOT NULL,
+    inner_width_mm REAL NOT NULL,
+    inner_height_mm REAL NOT NULL,
+    empty_weight_kg REAL NOT NULL,
+    part_weight_kg REAL NOT NULL,
+    total_weight_kg REAL NOT NULL,
+    pallet_length_mm REAL,
+    pallet_width_mm REAL,
+    pallet_height_mm REAL,
+    bins_per_row INTEGER,
+    bins_per_column INTEGER,
+    layers_per_pallet INTEGER,
+    bins_per_pallet INTEGER,
+    stack_height_mm REAL,
+    pallet_load_weight_kg REAL,
+    inventory INTEGER DEFAULT 25,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Compatibility alias view for 'prodcuts'
-CREATE VIEW IF NOT EXISTS prodcuts AS SELECT * FROM products;
+-- 3. Base Pallets table
+CREATE TABLE IF NOT EXISTS base_pallets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    base_pallet TEXT NOT NULL UNIQUE,
+    outer_length_mm REAL NOT NULL,
+    outer_width_mm REAL NOT NULL,
+    outer_height_mm REAL NOT NULL,
+    empty_weight_kg REAL NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. Metal Pallets table
+CREATE TABLE IF NOT EXISTS metal_pallets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metal_pallet TEXT NOT NULL UNIQUE,
+    outer_length_mm REAL NOT NULL,
+    outer_width_mm REAL NOT NULL,
+    outer_height_mm REAL NOT NULL,
+    inner_length_mm REAL NOT NULL,
+    inner_width_mm REAL NOT NULL,
+    inner_height_mm REAL NOT NULL,
+    empty_weight_kg REAL NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. Metal Stillages table
+CREATE TABLE IF NOT EXISTS metal_stillages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metal_stillage TEXT NOT NULL UNIQUE,
+    outer_length_mm REAL NOT NULL,
+    outer_width_mm REAL NOT NULL,
+    outer_height_mm REAL NOT NULL,
+    inner_length_mm REAL NOT NULL,
+    inner_width_mm REAL NOT NULL,
+    inner_height_mm REAL NOT NULL,
+    empty_weight_kg REAL NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Trucks table
+CREATE TABLE IF NOT EXISTS trucks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    truck TEXT NOT NULL UNIQUE,
+    inner_length_mm REAL NOT NULL,
+    inner_width_mm REAL NOT NULL,
+    inner_height_mm REAL NOT NULL,
+    capacity_kg REAL NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
+---
+
 ### Verification & SQL Querying
-You can verify the database directly with Python or any SQLite CLI:
+
+Verify all migrated tables directly using Python:
 
 ```powershell
-python -c "import sqlite3; conn = sqlite3.connect('data/products.db'); print('Total products:', conn.execute('SELECT COUNT(*) FROM prodcuts').fetchone()[0])"
+python -c "import sqlite3; conn = sqlite3.connect('data/products.db'); print([(t[0], conn.execute(f'SELECT COUNT(*) FROM {t[0]}').fetchone()[0]) for t in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()])"
 ```
 
 ---
@@ -348,5 +456,18 @@ Open your browser to:
 ### 3. Verify Product Dataset via API
 ```powershell
 curl http://localhost:8000/api/custom-box/products
+```
+
+### 4. Verify Packages & 3D Mesh API
+```powershell
+# Retrieve all packaging inventory (excluding trucks)
+curl http://localhost:8000/api/packages
+
+# Filter by category (cartons, base pallets, metal pallets, metal stillages)
+curl "http://localhost:8000/api/packages?category=carton"
+curl "http://localhost:8000/api/packages?category=metal_stillage"
+
+# Fetch procedural 3D GLB container mesh generated by trimesh
+curl -OJ http://localhost:8000/api/packages/Package%201/mesh
 ```
 
