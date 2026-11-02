@@ -28,7 +28,7 @@ export interface PackagingItem {
   bins_per_pallet?: number | null
   stack_height_mm?: number | null
   pallet_load_weight_kg?: number | null
-  inventory: number
+  inventory?: number | null
   created_at?: string
 }
 
@@ -46,4 +46,3 @@ export interface PackageListResponse {
   counts: PackageCounts
   source: string
 }
-

@@ -141,7 +141,7 @@ def migrate_packages(conn: sqlite3.Connection, csv_path: str, clean: bool = Fals
             inner_w = float(row["inner_width_mm"])
             inner_h = float(row["inner_height_mm"])
             part_wt = float(row["part_weight_kg"])
-            inventory = int(row.get("inventory", 25))
+            inventory = int(row["inventory"]) if row.get("inventory") else None
 
             conn.execute(sql, (
                 row["package"].strip(),

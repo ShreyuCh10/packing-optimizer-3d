@@ -77,7 +77,7 @@ def init_db(db_path: Optional[str] = None) -> None:
                     bins_per_pallet INTEGER,
                     stack_height_mm REAL,
                     pallet_load_weight_kg REAL,
-                    inventory INTEGER DEFAULT 25,
+                    inventory INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -254,7 +254,7 @@ def get_unified_packaging(category: Optional[str] = None, db_path: Optional[str]
             item = dict(c)
             item["category"] = "carton"
             item["category_label"] = "Carton Box"
-            item["inventory"] = item.get("inventory", 25)
+            item["inventory"] = None
             items.append(item)
 
     # 2. Base Pallets (table: base_pallets)
@@ -284,7 +284,7 @@ def get_unified_packaging(category: Optional[str] = None, db_path: Optional[str]
                 "bins_per_pallet": None,
                 "stack_height_mm": p.get("outer_height_mm"),
                 "pallet_load_weight_kg": None,
-                "inventory": 25,
+                "inventory": None,
                 "created_at": p.get("created_at"),
             }
             items.append(item)
@@ -316,7 +316,7 @@ def get_unified_packaging(category: Optional[str] = None, db_path: Optional[str]
                 "bins_per_pallet": None,
                 "stack_height_mm": mp.get("outer_height_mm"),
                 "pallet_load_weight_kg": None,
-                "inventory": 25,
+                "inventory": None,
                 "created_at": mp.get("created_at"),
             }
             items.append(item)
@@ -348,7 +348,7 @@ def get_unified_packaging(category: Optional[str] = None, db_path: Optional[str]
                 "bins_per_pallet": None,
                 "stack_height_mm": st.get("outer_height_mm"),
                 "pallet_load_weight_kg": None,
-                "inventory": 25,
+                "inventory": None,
                 "created_at": st.get("created_at"),
             }
             items.append(item)
@@ -382,4 +382,3 @@ def get_packaging_item_by_identifier(identifier: str, db_path: Optional[str] = N
             return item
 
     return None
-

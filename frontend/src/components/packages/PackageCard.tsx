@@ -98,13 +98,16 @@ export default function PackageCard({ pkg, onClick }: PackageCardProps) {
             )}
           </span>
 
-          <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded text-[11px]">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            {pkg.inventory ?? 25} in stock
+          <span className={`inline-flex items-center gap-1.5 font-medium px-2 py-0.5 rounded text-[11px] ${
+            pkg.inventory == null
+              ? 'text-slate-600 bg-slate-50 border border-slate-200'
+              : 'text-emerald-700 bg-emerald-50 border border-emerald-200/70'
+          }`}>
+            {pkg.inventory != null && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+            {pkg.inventory == null ? 'Stock not specified' : `${pkg.inventory} in stock`}
           </span>
         </div>
       </div>
     </div>
   )
 }
-

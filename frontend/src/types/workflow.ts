@@ -30,6 +30,9 @@ export interface RetrievalMetrics {
 }
 
 export interface CandidatePackage {
+  package_id?: number | string
+  package_code?: string
+  candidate_id?: string
   name: string
   category: string
   tier_label?: string
@@ -38,10 +41,21 @@ export interface CandidatePackage {
   dimensions?: { length: number; width: number; height: number; volume_liters?: number }
   max_weight_capacity_kg: number
   tare_weight_kg?: number
-  material?: string
+  material?: string | null
   volume_utilization_pct?: number
+  padded_bbox_utilization_pct?: number
   fits_multi_unit_bounding_box?: boolean
   description?: string
+  inventory?: number | null
+}
+
+export interface PackageRecommendation {
+  status: string
+  model?: string | null
+  selected_candidate_id: string
+  assistant_response: string
+  reasoning: string
+  selection_factors: string[]
 }
 
 export interface UtilizationMetrics {
@@ -129,6 +143,9 @@ export interface WorkflowResult {
   candidate_packages?: CandidatePackage[]
   fits: boolean
   best_container?: CandidatePackage | null
+  ai_recommendation?: PackageRecommendation | null
+  assistant_response?: string
+  closest_candidate?: CandidatePackage | null
   best_orientation?: BestOrientation | null
   utilization_metrics?: UtilizationMetrics | null
   placed_items?: PlacedItem[]
@@ -145,4 +162,3 @@ export interface ChatMessage {
   workflowResult?: WorkflowResult
   isError?: boolean
 }
-

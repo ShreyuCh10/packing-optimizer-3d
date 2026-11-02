@@ -18,6 +18,7 @@ export default function WorkflowMessageCard({
   const req = result.requirements ?? {}
   const metrics = result.metrics ?? {}
   const candidates = result.candidate_packages ?? []
+  const recommendation = result.ai_recommendation
   const util = result.utilization_metrics
   const bestCont = result.best_container
   const bestDims =
@@ -36,6 +37,10 @@ export default function WorkflowMessageCard({
   const snp = req.snp || metrics.snp || 1
   const foamMaterial = metrics.recommended_padding_material || 'Polyethylene Foam'
   const foamThickness = metrics.recommended_padding_thickness_mm ?? 15
+  const productMeshIdentifier = req.product_id ?? req.matched_product_id ?? req.name ?? metrics.part_name
+  const productMeshUrl = productMeshIdentifier
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/products/${encodeURIComponent(String(productMeshIdentifier))}/mesh`
+    : undefined
 
   return (
     <div className="w-full space-y-3.5">
@@ -53,7 +58,7 @@ export default function WorkflowMessageCard({
             🤖
           </div>
           <div className="flex-1 whitespace-pre-wrap">
-            {result.summary || 'Unified packaging workflow executed.'}
+            {result.assistant_response || result.summary || 'Unified packaging workflow executed.'}
           </div>
         </div>
       </div>
@@ -225,7 +230,7 @@ export default function WorkflowMessageCard({
 
                   {util && (
                     <div className="text-right">
-                      <div className="text-xs font-semibold text-slate-500">Volume Utilization</div>
+                      <div className="text-xs font-semibold text-slate-500">Item-Volume Utilization</div>
                       <div className="text-lg font-bold text-sky-700">
                         {util.volume_utilization_pct}%
                       </div>
@@ -237,6 +242,35 @@ export default function WorkflowMessageCard({
               {/* Interactive Three.js 3D Viewer */}
               {hasScene ? (
                 <div>
+                  {recommendation && (
+                    <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-bold text-emerald-950">
+                          {recommendation.model
+                            ? 'GPT package recommendation'
+                            : 'Package recommendation (deterministic fallback)'}
+                        </div>
+                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-emerald-800 border border-emerald-200">
+                          {recommendation.model || recommendation.status}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-xs leading-relaxed text-emerald-900">
+                        {recommendation.reasoning}
+                      </p>
+                      {recommendation.selection_factors.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {recommendation.selection_factors.map((factor) => (
+                            <span
+                              key={factor}
+                              className="rounded-md bg-white/80 px-2 py-1 text-[10px] text-emerald-900 border border-emerald-100"
+                            >
+                              {factor}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mb-1.5 px-0.5">
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                       Interactive 3D Packing View (Three.js)
@@ -248,11 +282,14 @@ export default function WorkflowMessageCard({
                   <PackingSceneViewer
                     sceneData={result.scene_data}
                     containerName={bestCont?.name || 'Container'}
+                    productMeshUrl={productMeshUrl}
                   />
                 </div>
               ) : (
                 <div className="text-center py-6 text-sm text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                  No 3D scene data generated for this combination.
+                  {result.fits
+                    ? 'No 3D scene data was generated for this recommendation.'
+                    : 'No package passed the complete 3D fit and weight checks, so there is no recommended package to display.'}
                 </div>
               )}
 
@@ -273,7 +310,7 @@ export default function WorkflowMessageCard({
 
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                      Volume Used
+                      Product Volume Occupancy
                     </div>
                     <div className="text-sm font-bold text-sky-700 mt-0.5">
                       {util.volume_utilization_pct}%
@@ -285,13 +322,13 @@ export default function WorkflowMessageCard({
 
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                      Void / Waste
+                      Remaining Container Volume
                     </div>
                     <div className="text-sm font-bold text-slate-800 mt-0.5">
                       {util.wasted_volume_liters} L
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
-                      Clearance space
+                      Unoccupied by products; not a cushioning measurement
                     </div>
                   </div>
 
@@ -330,14 +367,15 @@ export default function WorkflowMessageCard({
           {activeTab === 'candidates' && (
             <div className="p-4 space-y-3">
               <div className="text-xs text-slate-600 mb-1">
-                The Retrieval & Gathering Agent evaluated SQLite packaging inventory tables (
-                <code>packages</code>, <code>metal_stillages</code>, <code>metal_pallets</code>)
-                and narrowed down {candidates.length} candidate container(s):
+                Compared dataset package dimensions and rated payloads across {candidates.length} candidate
+                container(s). Package construction, protection ratings, and stock counts are not specified
+                in the source dataset.
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {candidates.map((cand, idx) => {
-                  const isWinner = cand.name === bestCont?.name
+                  const candidateId = cand.package_code || cand.package_id || cand.name
+                  const isWinner = candidateId === bestCont?.candidate_id || cand.name === bestCont?.name
 
                   return (
                     <div
@@ -389,9 +427,17 @@ export default function WorkflowMessageCard({
                         </div>
                         {cand.volume_utilization_pct !== undefined && (
                           <div className="flex justify-between text-slate-600">
-                            <span>Theoretical Util:</span>
+                            <span>Item-volume utilization:</span>
                             <span className="font-bold text-sky-700">
                               {cand.volume_utilization_pct}%
+                            </span>
+                          </div>
+                        )}
+                        {cand.padded_bbox_utilization_pct !== undefined && (
+                          <div className="flex justify-between text-slate-600">
+                            <span>Padded-bounds estimate:</span>
+                            <span className="font-mono text-slate-700">
+                              {cand.padded_bbox_utilization_pct}%
                             </span>
                           </div>
                         )}
