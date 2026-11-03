@@ -362,7 +362,7 @@ def fetch_all_candidates_from_db(
                         "outer_height_mm": float(row.get("outer_height_mm") or 100.0),
                         "max_weight_capacity_kg": float(row.get("part_weight_kg") or row.get("total_weight_kg") or 9.0),
                         "empty_weight_kg": float(row.get("empty_weight_kg") or 1.0),
-                        "inventory": int(row.get("inventory", 25)),
+                        "inventory": int(row.get("inventory") or 25),
                         "pallet_info": {
                             "pallet_length_mm": row.get("pallet_length_mm"),
                             "pallet_width_mm": row.get("pallet_width_mm"),

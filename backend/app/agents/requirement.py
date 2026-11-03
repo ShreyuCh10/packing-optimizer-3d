@@ -1,4 +1,4 @@
-from typing import TypedDict, Literal, Optional, Dict, Any, Union
+from typing import TypedDict, Literal, Optional, Dict, Any, Union, Tuple
 import re
 
 from laya.integrations.langchain import LayaRouter
@@ -6,6 +6,13 @@ from langgraph.graph import START, END, StateGraph
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field, AliasChoices
 from app.models import llm
+
+try:
+    from app.db import get_product_by_id, get_product_by_name, get_all_products
+except Exception:
+    get_product_by_id = None
+    get_product_by_name = None
+    get_all_products = None
 
 # Alias for compatibility if referenced as MessagePromptTemplate
 MessagePromptTemplate = PromptTemplate
@@ -24,6 +31,8 @@ class Requirements(BaseModel):
     )
     part_type: str = Field(..., description="The material the part is made of ")
     part_weight: float = Field(..., description="The weight of the part associated with the requirement")
+    product_id: Optional[int] = Field(default=None, description="SQLite catalog product ID if matched")
+    matched_product_id: Optional[int] = Field(default=None, description="Matched SQLite product ID")
     extra: dict = Field(default_factory=dict, description="Any additional information related to the requirement")
 
     model_config = {"populate_by_name": True}
@@ -63,6 +72,19 @@ def evaluate_with_laya_details(requirements_text: str) -> Dict[str, Any]:
     )
     has_catalog_ref = bool(re.search(r"\bproduct\s*(?:id)?\s*[:#]?\s*\d+\b", text_lower))
 
+    # Also check if text matches a known product name in the database
+    has_catalog_name = False
+    if get_all_products:
+        try:
+            for p in get_all_products():
+                pname = p.get("part_name", "").lower()
+                pname_base = re.sub(r"s$", "", pname)
+                if len(pname_base) >= 3 and re.search(rf"\b{re.escape(pname_base)}s?\b", text_lower):
+                    has_catalog_name = True
+                    break
+        except Exception:
+            pass
+
     confidence = None
     laya_choice = None
     raw_decision = None
@@ -81,41 +103,37 @@ def evaluate_with_laya_details(requirements_text: str) -> Dict[str, Any]:
     except Exception:
         laya_choice = "fallback"
 
-    if has_3d_box or has_explicit_dims or has_catalog_ref:
+    if has_3d_box or has_explicit_dims or has_catalog_ref or has_catalog_name:
         decision = "extract_requirements"
         method = "Geometric Dimension & CAD Detection"
         confidence_val = round(float(confidence * 100), 1) if confidence else 95.0
         reasoning = f"Detected physical dimensions / catalog reference. Laya semantic confidence: {confidence_val}%."
     elif laya_choice == "yes":
         decision = "extract_requirements"
-        method = "Laya Zero-Latency Classifier"
-        confidence_val = round(float(confidence * 100), 1) if confidence else 74.3
-        reasoning = f"LayaRouter verified specification completeness with {confidence_val}% confidence (threshold: 50.0%)."
+        confidence_val = round(float(confidence * 100), 1) if confidence else 75.0
+        reasoning = f"Laya LLM confirmed valid requirement with {confidence_val}% confidence."
+        method = "Laya Semantic Classifier"
     else:
         decision = "HITL"
-        method = "Laya Gating Router (HITL Trigger)"
-        confidence_val = round(float(confidence * 100), 1) if confidence else 25.0
+        confidence_val = round(float(confidence * 100), 1) if confidence else 0.0
         reasoning = "Missing required part dimensions (length, width, height) or weight specifications."
+        method = "Completeness Gating"
 
     return {
         "decision": decision,
-        "is_fulfilled": decision == "extract_requirements",
-        "method": method,
         "confidence": confidence_val,
         "confidence_threshold": 50.0,
-        "laya_choice": laya_choice,
         "reasoning": reasoning,
-        "inputs": {
-            "prompt": requirements_text,
-            "instructions": REQUIREMENT_INSTRUCTIONS,
-            "criteria": REQUIREMENT_CRITERIA,
-        },
+        "method": method,
+        "laya_choice": laya_choice,
+        "is_fulfilled": decision == "extract_requirements",
+        "has_physical_dimensions": has_3d_box or has_explicit_dims or has_catalog_ref or has_catalog_name,
     }
 
 
-def _evaluate_with_laya_or_fallback(requirements_text: str) -> Literal["extract_requirements", "HITL"]:
-    """Compatibility helper returning destination branch literal."""
-    details = evaluate_with_laya_details(requirements_text)
+def _evaluate_with_laya_or_fallback(text: str) -> Literal["extract_requirements", "HITL"]:
+    """Fast synchronous helper for parse_requirements returning routing decision string."""
+    details = evaluate_with_laya_details(text)
     return details["decision"]
 
 
@@ -149,11 +167,93 @@ def route_requirements(state: RequirementState) -> Literal["extract_requirements
     return "HITL"
 
 
+def _extract_explicit_snp(text: str) -> Optional[int]:
+    """Extract explicit quantity/SNP from text if specified, ignoring product ID numbers."""
+    # Exclude "product <id>" before looking for quantity
+    text_clean = re.sub(r"\bproduct\s*(?:id)?\s*[:#]?\s*\d+\b", "", text, flags=re.IGNORECASE)
+
+    # 1. snp = 64, quantity: 64, qty = 64
+    m = re.search(r"\b(?:snp|quantity|qty|count)\s*[:=]?\s*(\d+)\b", text_clean, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    # 2. "pack 64 units", "shipping for 50", "package for 4"
+    m = re.search(r"(?:pack|packaging for|packing for|package for|packages for|carton for|box for|shipping for)\s+(\d+)\b", text_clean, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    # 3. "64 units", "64 parts", "64 pieces", "64 items"
+    m = re.search(r"\b(\d+)\s+(?:(?:[a-zA-Z]+)\s+)?(?:units|parts|pieces|items|brackets|pins|doors|plates|boxes|housings|bushings|assemblies|modules|heatsinks|clips|ingots|sensors)\b", text_clean, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    return None
+
+
+def _match_catalog_product(text: str) -> Optional[Tuple[Dict[str, Any], Optional[int]]]:
+    """Check if the text references a catalog product by ID or by name from SQLite products table.
+
+    Returns:
+        (product_dict, explicit_snp_if_any) or None
+    """
+    text_lower = text.lower()
+
+    # 1. Check for explicit product ID: e.g. "product 1", "product id: 1", "product #1", "lookup product 1"
+    pid_match = re.search(r"\bproduct\s*(?:id)?\s*[:#]?\s*(\d+)\b", text_lower)
+    if pid_match and get_product_by_id:
+        try:
+            pid = int(pid_match.group(1))
+            prod = get_product_by_id(pid)
+            if prod:
+                explicit_snp = _extract_explicit_snp(text)
+                return prod, explicit_snp
+        except Exception:
+            pass
+
+    # 2. Check for catalog product names (e.g. "Micro Terminal Block")
+    if get_all_products:
+        try:
+            all_prods = get_all_products()
+            for prod in sorted(all_prods, key=lambda p: len(p.get("part_name", "")), reverse=True):
+                pname = prod.get("part_name", "")
+                pname_base = re.sub(r"s$", "", pname, flags=re.IGNORECASE)
+                if len(pname_base) >= 3 and re.search(rf"\b{re.escape(pname_base)}s?\b", text, re.IGNORECASE):
+                    explicit_snp = _extract_explicit_snp(text)
+                    return prod, explicit_snp
+        except Exception:
+            pass
+
+    return None
+
+
 def _fallback_extract(text: str) -> Requirements:
-    """Fallback extractor when LLM API credentials or network are unavailable."""
+    """Fallback extractor: checks SQLite catalog first, then deterministic regex extraction."""
+    # 0. Check SQLite catalog match first
+    catalog_match = _match_catalog_product(text)
+    if catalog_match:
+        prod, explicit_snp = catalog_match
+        pid = prod.get("id")
+        snp_val = explicit_snp or prod.get("standard_no_of_parts") or 1
+        return Requirements(
+            name=str(prod.get("part_name", f"Product {pid}")),
+            description=text.strip() or f"Catalog Product {pid}",
+            snp=str(snp_val),
+            part_length=float(prod.get("part_length", 100.0)),
+            part_width=float(prod.get("part_breadth", prod.get("part_width", 80.0))),
+            part_height=float(prod.get("part_height", 50.0)),
+            part_type=str(prod.get("part_type", "Standard")),
+            part_weight=float(prod.get("part_weight", 1.0)),
+            product_id=pid,
+            matched_product_id=pid,
+            extra={"product_id": pid, "matched_product_id": pid, "catalog_matched": True},
+        )
+
     def _search_num(pattern: str, default: float) -> float:
         m = re.search(pattern, text, re.IGNORECASE)
         return float(m.group(1)) if m else default
+
+    # Exclude product ID mentions before extracting raw numbers
+    text_clean = re.sub(r"\bproduct\s*(?:id)?\s*[:#]?\s*\d+\b", "", text, flags=re.IGNORECASE)
 
     # 1. 3D Dimensions: Check for compact 3D dimension box (e.g., 140x90x60mm or 140 x 90 x 60 mm)
     dim_box = re.search(r"(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)", text)
@@ -162,7 +262,7 @@ def _fallback_extract(text: str) -> Requirements:
         width = float(dim_box.group(2))
         height = float(dim_box.group(3))
     else:
-        nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text)]
+        nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text_clean)]
         length = _search_num(r"length\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[0] if len(nums) > 0 else 100.0)
         width = _search_num(r"width\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[1] if len(nums) > 1 else 100.0)
         height = _search_num(r"height\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[2] if len(nums) > 2 else 50.0)
@@ -178,16 +278,8 @@ def _fallback_extract(text: str) -> Requirements:
     part_type = mat_match.group(1).lower() if mat_match else "standard"
 
     # 4. SNP / Quantity
-    snp_match = re.search(r"\bsnp\s*[:=]?\s*(\d+)", text, re.IGNORECASE)
-    if not snp_match:
-        snp_match = re.search(r"\b(?:snp|quantity|qty|packs?|units?|count)\b\s*[:=]?\s*(\d+)", text, re.IGNORECASE)
-    if not snp_match:
-        snp_match = re.search(r"(?:pack|packaging for|packing for|package for|packages for|carton for|box for|shipping for)\s+(\d+)", text, re.IGNORECASE)
-    if not snp_match:
-        snp_match = re.search(r"\b(\d+)\s+(?:(?:[a-zA-Z]+)\s+)?(?:units|parts|pieces|items|brackets|pins|doors|plates|boxes|housings|bushings|assemblies|modules|heatsinks|clips|ingots|sensors)\b", text, re.IGNORECASE)
-    if not snp_match:
-        snp_match = re.search(r"\b(?:for|pack|ship|box)\s+(\d+)\b", text, re.IGNORECASE)
-    snp = snp_match.group(1).rstrip(".,;:") if snp_match else "SNP-1"
+    explicit_snp = _extract_explicit_snp(text)
+    snp = str(explicit_snp) if explicit_snp is not None else "SNP-1"
 
     # 5. Name
     name_match = re.search(r"(?:part|name)\s*[:=]?\s*([a-zA-Z0-9_\- ]+?)(?=\s+(?:length|width|height|weight|material|type|snp|$))", text, re.IGNORECASE)
@@ -211,7 +303,7 @@ def _fallback_extract(text: str) -> Requirements:
 def extract_requirements(
     requirements: Union[RequirementState, str]
 ) -> Union[Requirements, Dict[str, Any]]:
-    """Extract structured Requirements from input text using LLM structured output or deterministic fallback.
+    """Extract structured Requirements from input text using catalog auto-lookup, LLM structured output, or deterministic fallback.
 
     - When called with a string, returns a Requirements model instance.
     - When called as a LangGraph node with state dict, updates 'requirements' and 'extraction_trace' in state.
@@ -221,20 +313,42 @@ def extract_requirements(
     else:
         req_text = requirements.get("requirement", "")
 
-    prompt = PromptTemplate.from_template(
-        "Extract the packing and part requirements from the following text: {requirements}"
-    )
+    # 1. Priority A: Check if input references a catalog product from SQLite database
+    catalog_match = _match_catalog_product(req_text)
+    if catalog_match:
+        prod, explicit_snp = catalog_match
+        pid = prod.get("id")
+        snp_val = explicit_snp or prod.get("standard_no_of_parts") or 1
+        res = Requirements(
+            name=str(prod.get("part_name", f"Product {pid}")),
+            description=req_text.strip() or f"Catalog Product {pid}",
+            snp=str(snp_val),
+            part_length=float(prod.get("part_length", 100.0)),
+            part_width=float(prod.get("part_breadth", prod.get("part_width", 80.0))),
+            part_height=float(prod.get("part_height", 50.0)),
+            part_type=str(prod.get("part_type", "Standard")),
+            part_weight=float(prod.get("part_weight", 1.0)),
+            product_id=pid,
+            matched_product_id=pid,
+            extra={"product_id": pid, "matched_product_id": pid, "catalog_matched": True},
+        )
+        extraction_method = "SQLite Catalog Auto-Lookup (Products Table)"
+        extraction_status = f"database_catalog_matched (Product ID: {pid})"
+    else:
+        # 2. Priority B: Ad-hoc custom part - Extract via LLM or deterministic fallback
+        prompt = PromptTemplate.from_template(
+            "Extract the packing and part requirements from the following text: {requirements}"
+        )
+        extraction_method = "Azure OpenAI (gpt-4o)"
+        extraction_status = "live_llm"
 
-    extraction_method = "Azure OpenAI (gpt-4o)"
-    extraction_status = "live_llm"
-
-    try:
-        llm_with_structured_output = llm.with_structured_output(Requirements)
-        res: Requirements = llm_with_structured_output.invoke(prompt.format(requirements=req_text))
-    except Exception:
-        res = _fallback_extract(req_text)
-        extraction_method = "Deterministic Regex Extractor"
-        extraction_status = "fallback_rules (LLM credentials placeholder)"
+        try:
+            llm_with_structured_output = llm.with_structured_output(Requirements)
+            res = llm_with_structured_output.invoke(prompt.format(requirements=req_text))
+        except Exception:
+            res = _fallback_extract(req_text)
+            extraction_method = "Deterministic Regex Extractor"
+            extraction_status = "fallback_rules (LLM credentials placeholder)"
 
     if isinstance(requirements, str):
         return res
