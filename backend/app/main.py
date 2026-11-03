@@ -1,3 +1,15 @@
+import os
+from dotenv import find_dotenv, load_dotenv
+
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for env_file in [
+    os.path.join(BACKEND_DIR, ".env"),
+    os.path.join(os.path.dirname(BACKEND_DIR), ".env"),
+    find_dotenv(),
+]:
+    if env_file and os.path.exists(env_file):
+        load_dotenv(env_file, override=False)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

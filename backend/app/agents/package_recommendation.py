@@ -2,8 +2,18 @@ import json
 import os
 from typing import Any, Dict, List, Literal
 
-from langchain_openai import ChatOpenAI
+from dotenv import find_dotenv, load_dotenv
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from pydantic import BaseModel, Field
+
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+for env_file in [
+    os.path.join(BACKEND_DIR, ".env"),
+    os.path.join(os.path.dirname(BACKEND_DIR), ".env"),
+    find_dotenv(),
+]:
+    if env_file and os.path.exists(env_file):
+        load_dotenv(env_file, override=False)
 
 SelectionFactor = Literal[
     "highest_item_volume_utilization",
@@ -93,9 +103,7 @@ def _deterministic_recommendation(
     )
     recommendation = _grounded_explanation(selected, candidates, status)
     if status != "single_feasible_candidate":
-        recommendation["assistant_response"] += (
-            " This selection uses a deterministic fallback because the GPT-5.1 service is not configured."
-        )
+        recommendation["assistant_response"] += " The model is not configured."
         recommendation["reasoning"] = recommendation["assistant_response"]
     return recommendation
 
@@ -109,18 +117,37 @@ def recommend_package(candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(set(candidate_ids)) != len(candidate_ids):
         raise ValueError("Feasible package candidates must have unique identifiers.")
 
-    endpoint = os.getenv("AZURE_FOUNDRY_OPENAI_BASE_URL")
-    api_key = os.getenv("AZURE_FOUNDRY_OPENAI_API_KEY")
-    model_name = os.getenv("AZURE_FOUNDRY_OPENAI_MODEL", "gpt-5.1")
-    if not endpoint or not api_key:
+    foundry_endpoint = os.getenv("AZURE_FOUNDRY_OPENAI_BASE_URL")
+    foundry_key = os.getenv("AZURE_FOUNDRY_OPENAI_API_KEY")
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_key = os.getenv("AZURE_OPENAI_API_KEY")
+
+    if foundry_endpoint and foundry_key:
+        model_name = os.getenv("AZURE_FOUNDRY_OPENAI_MODEL", "gpt-5.1")
+        model = ChatOpenAI(
+            model=model_name,
+            base_url=foundry_endpoint,
+            api_key=foundry_key,
+        ).with_structured_output(PackageRecommendation)
+    elif azure_endpoint and azure_key:
+        deployment = (
+            os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+            or "gpt-5.1"
+        ).strip('"\'')
+        model_name = os.getenv("AZURE_OPENAI_MODEL_NAME") or deployment
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
+        model = AzureChatOpenAI(
+            azure_deployment=deployment,
+            model_name=model_name,
+            azure_endpoint=azure_endpoint,
+            api_key=azure_key,
+            api_version=api_version,
+            temperature=float(os.getenv("AZURE_OPENAI_TEMPERATURE", 0.0)),
+        ).with_structured_output(PackageRecommendation)
+    else:
         status = "single_feasible_candidate" if len(candidates) == 1 else "model_not_configured"
         return _deterministic_recommendation(candidates, status)
-
-    model = ChatOpenAI(
-        model=model_name,
-        base_url=endpoint,
-        api_key=api_key,
-    ).with_structured_output(PackageRecommendation)
 
     candidate_data = [
         {
@@ -162,9 +189,10 @@ def recommend_package(candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
     try:
         response: PackageRecommendation = model.invoke(prompt)
     except Exception as exc:
-        raise PackageRecommendationError(
-            f"Azure AI Foundry package recommendation failed: {exc}"
-        ) from exc
+        fallback = _deterministic_recommendation(candidates, "model_call_failed")
+        fallback["reasoning"] += f" (Live model unavailable: {exc})"
+        fallback["error"] = str(exc)
+        return fallback
 
     selected_id = str(response.candidate_id)
     if selected_id not in candidate_ids:

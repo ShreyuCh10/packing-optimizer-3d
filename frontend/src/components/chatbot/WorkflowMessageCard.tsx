@@ -352,7 +352,7 @@ export default function WorkflowMessageCard({
                         <div className="text-sm font-bold text-emerald-950">
                           {recommendation.model
                             ? 'GPT package recommendation'
-                            : 'Package recommendation (deterministic fallback)'}
+                            : 'Model is not configured'}
                         </div>
                         <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-emerald-800 border border-emerald-200">
                           {recommendation.model || recommendation.status}
