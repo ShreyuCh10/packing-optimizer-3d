@@ -19,7 +19,7 @@ A fully deterministic system that takes part/packaging requirements
    - Filters by 3D orthogonal spatial fit, weight capacity, and inventory > 0.
 4. Narrows down to the most useful packages:
    - Eliminates excessively oversized containers that waste volume.
-   - Curates Top 3 to 5 best-performing options ranked by volume utilization.
+   - Ranks options by item-volume utilization and reports padded-bounds utilization separately.
    - Categorizes them into fit tiers:
      * 🥇 Best Fit (Optimal Volume Utilization)
      * 🥈 Comfort Fit (Buffered Clearance for handling & extra dunnage)
@@ -27,6 +27,7 @@ A fully deterministic system that takes part/packaging requirements
      * 🏗️ Heavy-Duty / Bulk Option (when payload exceeds carton limits or heavy industrial)
 """
 
+import csv
 import os
 import re
 import sqlite3
@@ -82,15 +83,6 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
-
-
-# Standard fallback packages used when packages table is not yet created in SQLite
-STANDARD_FALLBACK_PACKAGES = [
-    {"package_code": "BOX-S1", "name": "Small Standard Carton (S-1)", "category": "carton", "inner_length_mm": 288.0, "inner_width_mm": 188.0, "inner_height_mm": 92.0, "outer_length_mm": 300.0, "outer_width_mm": 200.0, "outer_height_mm": 100.0, "max_weight_capacity": 4.6, "inventory": 25, "material": "Single Wall Cardboard"},
-    {"package_code": "BOX-M1", "name": "Medium Standard Carton (M-1)", "category": "carton", "inner_length_mm": 394.0, "inner_width_mm": 259.0, "inner_height_mm": 165.0, "outer_length_mm": 410.0, "outer_width_mm": 275.0, "outer_height_mm": 175.0, "max_weight_capacity": 6.4, "inventory": 25, "material": "Double Wall Cardboard"},
-    {"package_code": "BOX-L1", "name": "Large Shipping Box (L-1)", "category": "carton", "inner_length_mm": 515.0, "inner_width_mm": 339.0, "inner_height_mm": 248.0, "outer_length_mm": 535.0, "outer_width_mm": 355.0, "outer_height_mm": 260.0, "max_weight_capacity": 8.5, "inventory": 25, "material": "Double Wall Heavy Duty"},
-    {"package_code": "BOX-XL1", "name": "Extra Large Cargo Box (XL-1)", "category": "carton", "inner_length_mm": 576.0, "inner_width_mm": 376.0, "inner_height_mm": 286.0, "outer_length_mm": 600.0, "outer_width_mm": 395.0, "outer_height_mm": 300.0, "max_weight_capacity": 9.0, "inventory": 25, "material": "Triple Wall Industrial"},
-]
 
 
 # ==========================================
@@ -362,7 +354,7 @@ def fetch_all_candidates_from_db(
                         "outer_height_mm": float(row.get("outer_height_mm") or 100.0),
                         "max_weight_capacity_kg": float(row.get("part_weight_kg") or row.get("total_weight_kg") or 9.0),
                         "empty_weight_kg": float(row.get("empty_weight_kg") or 1.0),
-                        "inventory": int(row.get("inventory") or 25),
+                        "inventory": int(row["inventory"]) if row.get("inventory") is not None else None,
                         "pallet_info": {
                             "pallet_length_mm": row.get("pallet_length_mm"),
                             "pallet_width_mm": row.get("pallet_width_mm"),
@@ -374,7 +366,7 @@ def fetch_all_candidates_from_db(
                             "stack_height_mm": row.get("stack_height_mm"),
                             "pallet_load_weight_kg": row.get("pallet_load_weight_kg"),
                         },
-                        "material": "Cardboard Carton",
+                        "material": None,
                     })
 
             # 2. Metal Stillages (table: metal_stillages)
@@ -399,11 +391,11 @@ def fetch_all_candidates_from_db(
                         "outer_length_mm": float(row.get("outer_length_mm")),
                         "outer_width_mm": float(row.get("outer_width_mm")),
                         "outer_height_mm": float(row.get("outer_height_mm")),
-                        "max_weight_capacity_kg": 1200.0,  # Industrial transport stillage capacity
+                        "max_weight_capacity_kg": None,
                         "empty_weight_kg": float(row.get("empty_weight_kg", 65.0)),
-                        "inventory": 25,
+                        "inventory": None,
                         "pallet_info": None,
-                        "material": "Industrial Steel Stillage",
+                        "material": None,
                     })
 
             # 3. Metal Pallets (table: metal_pallets)
@@ -428,11 +420,11 @@ def fetch_all_candidates_from_db(
                         "outer_length_mm": float(row.get("outer_length_mm")),
                         "outer_width_mm": float(row.get("outer_width_mm")),
                         "outer_height_mm": float(row.get("outer_height_mm")),
-                        "max_weight_capacity_kg": 1500.0,
+                        "max_weight_capacity_kg": None,
                         "empty_weight_kg": float(row.get("empty_weight_kg", 28.0)),
-                        "inventory": 25,
+                        "inventory": None,
                         "pallet_info": None,
-                        "material": "Galvanized Metal Pallet",
+                        "material": None,
                     })
 
             # 4. Base Pallets (table: base_pallets)
@@ -453,24 +445,49 @@ def fetch_all_candidates_from_db(
                         "category_label": "Base Pallet",
                         "inner_length_mm": float(row.get("outer_length_mm")),
                         "inner_width_mm": float(row.get("outer_width_mm")),
-                        "inner_height_mm": 1200.0,  # Standard pallet cargo vertical limit
+                        "inner_height_mm": 0.0,
                         "outer_length_mm": float(row.get("outer_length_mm")),
                         "outer_width_mm": float(row.get("outer_width_mm")),
                         "outer_height_mm": float(row.get("outer_height_mm")),
-                        "max_weight_capacity_kg": 1000.0,
+                        "max_weight_capacity_kg": None,
                         "empty_weight_kg": float(row.get("empty_weight_kg", 26.0)),
-                        "inventory": 25,
+                        "inventory": None,
                         "pallet_info": None,
-                        "material": "Timber Base Pallet",
+                        "material": None,
                     })
 
         conn.close()
-    except Exception:
-        tables_queried = []
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"Could not read package data from SQLite: {exc}") from exc
 
-    # If database tables are not found, use standard fallback packages
-    if not candidates:
-        for p in STANDARD_FALLBACK_PACKAGES:
+    # Use the authoritative package dataset when the database has not been migrated.
+    if not any(candidate["category"] == "carton" for candidate in candidates):
+        packages_csv = os.path.join(BACKEND_DIR, "data", "packages.csv")
+        try:
+            with open(packages_csv, "r", encoding="utf-8", newline="") as source:
+                package_rows = csv.DictReader(source)
+                for row in package_rows:
+                    name = row["package"].strip()
+                    candidates.append({
+                        "package_id": name,
+                        "package_code": name,
+                        "name": name,
+                        "category": "carton",
+                        "category_label": "Carton Box",
+                        "inner_length_mm": float(row["inner_length_mm"]),
+                        "inner_width_mm": float(row["inner_width_mm"]),
+                        "inner_height_mm": float(row["inner_height_mm"]),
+                        "outer_length_mm": float(row["outer_length_mm"]),
+                        "outer_width_mm": float(row["outer_width_mm"]),
+                        "outer_height_mm": float(row["outer_height_mm"]),
+                        "max_weight_capacity_kg": float(row["part_weight_kg"]),
+                        "empty_weight_kg": float(row["empty_weight_kg"]),
+                        "inventory": None,
+                        "pallet_info": None,
+                        "material": None,
+                    })
+        except (OSError, KeyError, ValueError) as exc:
+            raise RuntimeError(f"Could not load authoritative package dataset {packages_csv}: {exc}") from exc
             candidates.append({
                 "package_id": p["package_code"],
                 "package_code": p["package_code"],
@@ -501,8 +518,8 @@ def narrow_down_packages(
     """Evaluate physical fit and intelligently narrow down the matching packages.
 
     Narrowing criteria:
-    1. Feasibility: inventory > 0, 3D orthogonal spatial fit, and weight capacity.
-    2. Efficiency: calculates volume utilization % and void fill / wasted volume.
+    1. Feasibility: not out of stock when stock is known, 3D orthogonal fit, and a verified weight capacity.
+    2. Efficiency: calculates item-volume utilization and padded-bounds utilization separately.
     3. Categorization & Prioritization:
        - If payload fits standard cartons (<= 9kg), cartons are prioritized as primary parcel options.
        - If payload exceeds standard carton capacity (> 9kg) or is heavy industrial, stillages/pallets
@@ -523,25 +540,42 @@ def narrow_down_packages(
     all_fitting: List[Dict[str, Any]] = []
 
     for pkg in candidates:
-        inventory = int(pkg.get("inventory", 0))
-        if inventory <= 0:
+        inventory_value = pkg.get("inventory")
+        inventory = int(inventory_value) if inventory_value is not None else None
+        if inventory is not None and inventory <= 0:
             continue
 
         box_l = float(pkg["inner_length_mm"])
         box_w = float(pkg["inner_width_mm"])
         box_h = float(pkg["inner_height_mm"])
-        max_wt = float(pkg.get("max_weight_capacity_kg", 9999.0))
+        max_weight_value = pkg.get("max_weight_capacity_kg")
+        max_wt = float(max_weight_value) if max_weight_value is not None else None
 
         # Check 3D geometric orthogonal fit
         fits_3d = check_3d_fits([req_l, req_w, req_h], [box_l, box_w, box_h])
 
         # Check weight capacity
-        fits_weight = max_wt >= max_rating
+        fits_weight = max_wt is not None and max_wt >= max_rating
 
         if fits_3d and fits_weight:
             box_volume_liters = round((box_l * box_w * box_h) / 1000000.0, 3)
-            utilization_pct = round((vol_required / max(0.001, box_volume_liters)) * 100.0, 1)
-            wasted_vol = round(max(0.0, box_volume_liters - vol_required), 3)
+            item_volume_liters = float(metrics.get("total_product_volume_liters", 0.0))
+            utilization_pct = round(
+                (item_volume_liters / max(0.001, box_volume_liters)) * 100.0,
+                2,
+            )
+            padded_bbox_utilization_pct = round(
+                (vol_required / max(0.001, box_volume_liters)) * 100.0,
+                1,
+            )
+            remaining_volume_liters = round(
+                max(0.0, box_volume_liters - item_volume_liters),
+                3,
+            )
+            padded_bbox_clearance_liters = round(
+                max(0.0, box_volume_liters - vol_required),
+                3,
+            )
 
             # Dimensional slack (sum of clearance mm along best aligned axes)
             s_content = sorted([req_l, req_w, req_h])
@@ -565,10 +599,12 @@ def narrow_down_packages(
                 "inventory": inventory,
                 "box_volume_liters": box_volume_liters,
                 "volume_utilization_pct": min(100.0, utilization_pct),
-                "wasted_volume_liters": wasted_vol,
+                "padded_bbox_utilization_pct": min(100.0, padded_bbox_utilization_pct),
+                "wasted_volume_liters": remaining_volume_liters,
+                "padded_bbox_clearance_liters": padded_bbox_clearance_liters,
                 "slack_clearance_mm": slack_mm,
                 "pallet_info": pkg.get("pallet_info"),
-                "material": pkg.get("material", "Packaging"),
+                        "material": pkg.get("material"),
             })
 
     # Sort all fitting packages by volume utilization descending
@@ -635,8 +671,9 @@ def narrow_down_packages(
 
     else:
         summary_text = (
-            f"No package in warehouse inventory can accommodate the required dimensions "
-            f"({req_l}x{req_w}x{req_h} mm) and payload ({max_rating} kg). Custom box sizing is recommended."
+            f"No package with a verified payload rating can accommodate the required dimensions "
+            f"({req_l}x{req_w}x{req_h} mm) and payload ({max_rating} kg). Add rated heavy-duty packaging "
+            "data before making a recommendation."
         )
 
     best_match = narrowed[0] if narrowed else None

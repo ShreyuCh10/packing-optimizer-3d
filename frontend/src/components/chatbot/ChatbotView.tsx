@@ -8,7 +8,7 @@ const QUICK_PROMPTS = [
     title: 'Standard Part Packaging',
     subtitle: '4 steel brackets measuring 140×90×60mm, 1.2kg',
     prompt:
-      'Find a suitable inventory package for 4 steel brackets measuring 140x90x60mm with weight 1.2kg each.',
+      'Find a suitable package for 4 steel brackets measuring 140x90x60mm with weight 1.2kg each.',
   },
   {
     title: 'Catalog Product Auto-Lookup',
@@ -16,8 +16,8 @@ const QUICK_PROMPTS = [
     prompt: 'Lookup product 1 and pack all units according to its catalog SNP.',
   },
   {
-    title: 'Heavy Industrial Stillage',
-    subtitle: 'Solid Counterweight Ingot (Product 45, 38kg payload)',
+    title: 'Heavy Payload Rating Check',
+    subtitle: 'Solid Counterweight Ingot (Product 45, 38kg)',
     prompt:
       'Pack product 45 (Solid Counterweight Ingot). This part is heavy and will require industrial packaging.',
   },
@@ -32,7 +32,7 @@ export default function ChatbotView() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
-  const [currentRunningStage, setCurrentRunningStage] = useState<string>('requirement_gathering')
+  const [currentRunningStage, setCurrentRunningStage] = useState<string>('laya')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -63,12 +63,14 @@ export default function ChatbotView() {
     const t2 = setTimeout(() => setCurrentRunningStage('cushioning'), 800)
     const t3 = setTimeout(() => setCurrentRunningStage('sqlite'), 1300)
     const t4 = setTimeout(() => setCurrentRunningStage('optimizer'), 1800)
+    const t5 = setTimeout(() => setCurrentRunningStage('reasoning'), 2400)
 
     return () => {
       clearTimeout(t1)
       clearTimeout(t2)
       clearTimeout(t3)
       clearTimeout(t4)
+      clearTimeout(t5)
     }
   }, [isTyping])
 
@@ -154,7 +156,7 @@ export default function ChatbotView() {
           </span>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-full">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            3-Agent Pipeline Connected
+            Packaging Workflow
           </span>
         </div>
 
@@ -187,7 +189,7 @@ export default function ChatbotView() {
               What are you packing today?
             </h1>
             <p className="text-sm text-slate-500 mb-8 max-w-md">
-              Chat with our autonomous 3-agent pipeline: gathers specifications, evaluates real SQLite packaging inventory, and performs 3D Extreme Point packing.
+              Chat with our 3-agent pipeline: gathers specifications, checks package dimensions and rated payloads, then performs 3D packing.
             </p>
 
             {/* Prompt Suggestion Cards (2x2 grid) */}
@@ -265,11 +267,11 @@ export default function ChatbotView() {
                   <div className="flex items-center gap-2 mb-3">
                     <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
                     <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                      Executing Multi-Agent Tool Trace
+                      Executing Packaging Workflow
                     </span>
                   </div>
 
-                  {/* Visual 5-step tool progression mini-stepper */}
+                  {/* Visual workflow progression mini-stepper */}
                   <div className="space-y-2 text-xs">
                     <div className="flex items-center gap-2 text-slate-700">
                       <span
@@ -325,7 +327,7 @@ export default function ChatbotView() {
                         className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
                           currentRunningStage === 'sqlite'
                             ? 'bg-sky-600 text-white animate-pulse'
-                            : currentRunningStage === 'optimizer'
+                            : ['optimizer', 'reasoning'].includes(currentRunningStage)
                             ? 'bg-emerald-500 text-white'
                             : 'bg-slate-200 text-slate-500'
                         }`}
@@ -348,7 +350,23 @@ export default function ChatbotView() {
                         5
                       </span>
                       <span className={currentRunningStage === 'optimizer' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 5: 3D Extreme Point Optimizer (evaluating 6-DOF rotations & stability)
+                        Step 5: Deterministic 3D fit and weight validation
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <span
+                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          currentRunningStage === 'reasoning'
+                            ? 'bg-sky-600 text-white animate-pulse'
+                            : currentRunningStage === 'optimizer'
+                            ? 'bg-slate-200 text-slate-500'
+                            : 'bg-emerald-500 text-white'
+                        }`}
+                      >
+                        {currentRunningStage === 'reasoning' ? '6' : '✓'}
+                      </span>
+                      <span className={currentRunningStage === 'reasoning' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
+                        Step 6: GPT-5.1 package reasoning and recommendation
                       </span>
                     </div>
                   </div>
@@ -405,7 +423,7 @@ export default function ChatbotView() {
         </form>
 
         <p className="text-[11px] text-slate-400 text-center mt-2">
-          Connected to LangGraph Unified Packaging Workflow: Requirement Gathering • SQLite Candidate Retrieval • 3D Extreme Point Optimizer.
+          Connected to requirement extraction, SQLite package retrieval, deterministic 3D validation, and GPT-5.1 package recommendation.
         </p>
       </div>
     </div>

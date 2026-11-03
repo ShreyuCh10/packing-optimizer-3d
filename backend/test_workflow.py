@@ -61,10 +61,11 @@ def run_tests():
     res4 = run_unified_workflow({"product_id": 45})
     print(f"  Part: {res4['requirements'].get('name')}")
     print(f"  Total Weight: {res4['metrics'].get('max_rating')} kg")
-    print(f"  Winning Container: {res4['best_container'].get('name')} ({res4['best_container'].get('category')})")
+    print(f"  Winning Container: {res4['best_container']}")
     print(f"  Fits: {res4['fits']}")
-    assert res4["fits"] is True
-    assert res4["best_container"]["category"] in ("metal_stillage", "metal_pallet")
+    assert res4["fits"] is False
+    assert res4["best_container"] is None
+    assert "verified payload rating" in res4["assistant_response"]
 
     # -------------------------------------------------------------
     # Scenario 5: HTTP API Endpoint (run_workflow_endpoint)
@@ -82,4 +83,3 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
-

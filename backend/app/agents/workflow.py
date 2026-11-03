@@ -26,6 +26,7 @@ from app.agents.retrieval_gathering import (
 from app.agents.packing_optimizer import (
     run_packing_optimizer,
 )
+from app.agents.package_recommendation import recommend_package
 
 
 # ==========================================
@@ -76,6 +77,10 @@ class UnifiedPackagingWorkflowState(TypedDict, total=False):
     unplaced_items: Optional[List[Dict[str, Any]]]
     all_evaluations: Optional[List[Dict[str, Any]]]
     scene_data: Optional[Dict[str, Any]]
+    ai_recommendation: Optional[Dict[str, Any]]
+    assistant_response: Optional[str]
+    closest_candidate: Optional[Dict[str, Any]]
+    all_evaluations: Optional[List[Dict[str, Any]]]
 
     # Final Combined Status & Execution Steps
     status: str
@@ -86,6 +91,36 @@ class UnifiedPackagingWorkflowState(TypedDict, total=False):
 # ==========================================
 # Node 1: Requirement Gathering Agent
 # ==========================================
+
+def _extract_requested_quantity(text: str) -> Optional[int]:
+    patterns = (
+        r"\b(?:quantity|qty|snp)\s*(?:is|=|:)?\s*(\d+)\b",
+        r"\b(\d+)\s*(?:units?|pieces?|parts?|items?)\b",
+        r"\b(\d+)\s+(?:[a-z][\w-]*\s+){0,2}(?:brackets?|components?|products?)\b",
+        r"\bpack\s+(\d+)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return max(1, int(match.group(1)))
+    return None
+
+
+def _requested_quantity(raw_input: Union[str, Dict[str, Any]]) -> Optional[int]:
+    if not isinstance(raw_input, dict):
+        return _extract_requested_quantity(str(raw_input or ""))
+
+    direct_quantity = raw_input.get("quantity")
+    if direct_quantity is None:
+        direct_quantity = raw_input.get("snp")
+    if direct_quantity is not None:
+        match = re.search(r"\d+", str(direct_quantity))
+        if match:
+            return max(1, int(match.group(0)))
+
+    request_text = raw_input.get("user_input") or raw_input.get("requirement") or raw_input.get("text") or ""
+    return _extract_requested_quantity(str(request_text))
+
 
 def requirement_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str, Any]:
     """Node 1: Evaluates and parses requirements from raw text or structured input."""
@@ -98,6 +133,9 @@ def requirement_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str
 
         if has_dims or has_ref:
             req_dict = dict(raw_input)
+            quantity = _requested_quantity(raw_input)
+            if quantity is not None:
+                req_dict["snp"] = quantity
             structured_laya_trace = {
                 "decision": "extract_requirements",
                 "is_fulfilled": True,
@@ -138,6 +176,9 @@ def requirement_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str
 
     if is_fulfilled and extracted_req:
         req_dict = extracted_req.model_dump() if hasattr(extracted_req, "model_dump") else dict(extracted_req)
+        quantity = _requested_quantity(raw_input)
+        if quantity is not None:
+            req_dict["snp"] = quantity
         return {
             "current_stage": "requirement_gathering",
             "requirement_fulfilled": True,
@@ -232,11 +273,15 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
         inner = p.get("inner_dimensions_mm", {})
         containers_for_packing.append({
             "name": p.get("name"),
+            "package_id": p.get("package_id"),
+            "package_code": p.get("package_code"),
             "category": p.get("category", "carton"),
             "inner_length_mm": inner.get("length", 300.0),
             "inner_width_mm": inner.get("width", 200.0),
             "inner_height_mm": inner.get("height", 100.0),
             "max_weight_capacity_kg": p.get("max_weight_capacity_kg", 1000.0),
+            "material": p.get("material"),
+            "inventory": p.get("inventory"),
         })
 
     metrics = state.get("metrics", {})
@@ -257,20 +302,88 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
 
     packing_result = run_packing_optimizer(packing_input)
 
-    fits = packing_result.get("fits", False)
-    best_container = packing_result.get("best_container")
-    best_orientation = packing_result.get("best_orientation")
-    utilization_metrics = packing_result.get("utilization_metrics", {})
-    placed_items = packing_result.get("placed_items", [])
-    unplaced_items = packing_result.get("unplaced_items", [])
-    scene_data = packing_result.get("scene_data", {})
+    evaluations = packing_result.get("all_evaluations", [])
+    candidate_by_id = {
+        str(p.get("package_code") or p.get("package_id") or p.get("name")): p
+        for p in candidate_packages
+    }
+    feasible_evaluations = [evaluation for evaluation in evaluations if evaluation.get("fits")]
+    fits = bool(feasible_evaluations)
+    best_container = None
+    best_orientation = None
+    utilization_metrics = {}
+    placed_items = []
+    unplaced_items = []
+    scene_data = {}
+    ai_recommendation = None
+    closest_candidate = None
 
     part_name = requirements.get("name") or requirements.get("part_name") or metrics.get("part_name") or "Part"
     snp = resolved_snp
     foam_type = metrics.get("recommended_padding_material", "foam")
     foam_thick = metrics.get("recommended_padding_thickness_mm", 15.0)
+    unit_label = "unit" if str(snp) == "1" else "units"
 
-    if fits and best_container:
+    if feasible_evaluations:
+        recommendation_candidates = []
+        for evaluation in feasible_evaluations:
+            candidate_id = str(evaluation.get("candidate_id") or evaluation.get("container_name"))
+            package = candidate_by_id.get(candidate_id, {})
+            max_weight = float(evaluation.get("max_weight_capacity_kg", 0.0))
+            recommendation_candidates.append({
+                **package,
+                "candidate_id": candidate_id,
+                "name": evaluation.get("container_name"),
+                "category": evaluation.get("category"),
+                "inner_dimensions_mm": evaluation.get("container_dimensions"),
+                "max_weight_capacity_kg": max_weight,
+                "volume_utilization_pct": evaluation.get("volume_utilization_pct", 0.0),
+                "wasted_volume_liters": evaluation.get("wasted_volume_liters", 0.0),
+                "total_packed_weight_kg": evaluation.get("total_packed_weight_kg", 0.0),
+                "weight_margin_kg": round(max_weight - float(evaluation.get("total_packed_weight_kg", 0.0)), 3),
+                "product_name": part_name,
+                "quantity": snp,
+                "fragility": metrics.get("fragility", "standard"),
+            })
+
+        ai_recommendation = recommend_package(recommendation_candidates)
+        selected_id = ai_recommendation["selected_candidate_id"]
+        selected_evaluation = next(
+            item for item in feasible_evaluations
+            if str(item.get("candidate_id") or item.get("container_name")) == selected_id
+        )
+        selected_package = candidate_by_id.get(selected_id, {})
+        selected_dims = selected_evaluation.get("container_dimensions", {})
+        best_container = {
+            **selected_package,
+            "name": selected_evaluation.get("container_name"),
+            "candidate_id": selected_id,
+            "category": selected_evaluation.get("category"),
+            "inner_dimensions_mm": {
+                "length": selected_dims.get("length", 0.0),
+                "width": selected_dims.get("width", 0.0),
+                "height": selected_dims.get("height", 0.0),
+            },
+            "max_weight_capacity_kg": selected_evaluation.get("max_weight_capacity_kg"),
+        }
+        best_orientation = selected_evaluation.get("best_orientation")
+        utilization_metrics = {
+            "container_name": selected_evaluation.get("container_name"),
+            "container_volume_liters": selected_dims.get("volume_liters"),
+            "volume_utilization_pct": selected_evaluation.get("volume_utilization_pct"),
+            "wasted_volume_liters": selected_evaluation.get("wasted_volume_liters"),
+            "bounding_box_utilization_pct": selected_evaluation.get("bounding_box_utilization_pct"),
+            "total_packed_weight_kg": selected_evaluation.get("total_packed_weight_kg"),
+            "max_weight_capacity_kg": selected_evaluation.get("max_weight_capacity_kg"),
+            "weight_within_limit": selected_evaluation.get("weight_within_limit"),
+            "placed_count": selected_evaluation.get("placed_count"),
+            "unplaced_count": selected_evaluation.get("unplaced_count"),
+            "total_items": selected_evaluation.get("total_items"),
+        }
+        placed_items = selected_evaluation.get("placed_items", [])
+        unplaced_items = selected_evaluation.get("unplaced_items", [])
+        scene_data = selected_evaluation.get("scene_data", {})
+
         c_name = best_container.get("name", "Container")
         util_pct = utilization_metrics.get("volume_utilization_pct", 0.0)
         wasted_l = utilization_metrics.get("wasted_volume_liters", 0.0)
@@ -283,16 +396,22 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
 
         narrative = (
             f"End-to-end workflow completed successfully across all 3 agents:\n"
-            f"1. Requirement Gathering: Parsed {snp} units of '{part_name}'. Applied {foam_thick}mm {foam_type} padding.\n"
+            f"1. Requirement Gathering: Parsed {snp} {unit_label} of '{part_name}'. Applied {foam_thick}mm {foam_type} padding.\n"
             f"2. Retrieval Agent: Evaluated SQLite database and narrowed {state.get('total_candidates_found', 0)} candidates to {len(candidate_packages)} top choices.\n"
-            f"3. Packing Optimizer: Verified 3D Extreme Point placement for all {placed_n} items in '{c_name}'{orient_str} with 0 clashes. "
-            f"Achieved {util_pct}% volume utilization ({wasted_l} L void space, total packed weight: {total_wt} kg)."
+            f"3. Packing Optimizer: Verified 3D placement for all {placed_n} items in '{c_name}'{orient_str} with 0 clashes. "
+            f"Achieved {util_pct}% volume utilization ({wasted_l} L void space, total packed weight: {total_wt} kg).\n"
+            f"Package recommendation: {ai_recommendation['assistant_response']}"
         )
         status = "workflow_completed_optimal_fit"
     else:
+        partial = packing_result.get("best_container") or {}
+        partial_id = str(partial.get("candidate_id") or partial.get("package_code") or partial.get("package_id") or partial.get("name") or "")
+        closest_candidate = candidate_by_id.get(partial_id)
+        retrieval_summary = state.get("narrowing_summary")
         narrative = (
-            f"Workflow completed with partial fit. Standard warehouse containers cannot fully fit all {snp} units "
-            f"of '{part_name}'. Custom box sizing is recommended."
+            f"Workflow completed with partial fit. Standard warehouse containers cannot fully fit all {snp} {unit_label} "
+            f"of '{part_name}'. No package is recommended. "
+            f"{retrieval_summary or 'No candidate passed the complete 3D fit and weight checks.'}"
         )
         status = "workflow_completed_partial_fit"
 
@@ -300,6 +419,10 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
         "current_stage": "packing_optimization",
         "fits": fits,
         "best_container": best_container,
+        "ai_recommendation": ai_recommendation,
+        "assistant_response": ai_recommendation.get("assistant_response") if ai_recommendation else narrative,
+        "closest_candidate": closest_candidate,
+        "all_evaluations": evaluations,
         "best_orientation": best_orientation,
         "orientations_breakdown": packing_result.get("orientations_breakdown", []),
         "utilization_metrics": utilization_metrics,
@@ -547,6 +670,29 @@ def run_unified_workflow(
                 },
             })
 
+        recommendation = result.get("ai_recommendation")
+        if recommendation:
+            steps.append({
+                "id": "step_6_package_recommendation",
+                "tool_name": "Package Recommendation Agent",
+                "category": "optimization",
+                "summary": recommendation.get("reasoning", "Selected one package from the feasible candidates."),
+                "status": "success",
+                "method": recommendation.get("model") or "Deterministic feasible-candidate fallback",
+                "inputs": {
+                    "feasible_candidate_count": sum(
+                        1 for evaluation in result.get("all_evaluations", [])
+                        if evaluation.get("fits")
+                    ),
+                    "selection_scope": "Candidates that passed deterministic 3D fit and weight validation",
+                },
+                "outputs": {
+                    "selected_candidate_id": recommendation.get("selected_candidate_id"),
+                    "recommendation_status": recommendation.get("status"),
+                    "selection_factors": recommendation.get("selection_factors", []),
+                },
+            })
+
     return {
         "status": result.get("status"),
         "summary": result.get("summary"),
@@ -565,6 +711,9 @@ def run_unified_workflow(
         "unplaced_items": result.get("unplaced_items", []),
         "all_evaluations": result.get("all_evaluations", []),
         "scene_data": result.get("scene_data", {}),
+        "ai_recommendation": result.get("ai_recommendation"),
+        "assistant_response": result.get("assistant_response"),
+        "closest_candidate": result.get("closest_candidate"),
         "steps": steps,
     }
 

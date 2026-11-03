@@ -53,10 +53,9 @@ def run_tests():
     print(f"  Part: {m3['part_name']} | Total weight: {m3['max_rating']} kg")
     print(f"  Summary: {res3['narrowing_summary']}")
     print(f"  Total fitting in DB: {res3['total_candidates_found']} -> Narrowed: {res3['narrowed_count']}")
-    # Must use metal stillages / pallets because cartons only support up to 9kg
     rec3 = res3["recommended_package"]
-    print(f"  Top Choice: {rec3['name']} ({rec3['category_label']}) - Capacity: {rec3['max_weight_capacity_kg']} kg")
-    assert rec3["category"] in ("metal_stillage", "metal_pallet"), "Heavy part must select stillage or pallet"
+    assert rec3 is None, "Do not recommend heavy-duty packaging without a verified payload rating"
+    assert "verified payload rating" in res3["narrowing_summary"]
 
     # -------------------------------------------------------------
     # Test 4: Custom Unstructured Part Requirement
@@ -91,4 +90,3 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
-

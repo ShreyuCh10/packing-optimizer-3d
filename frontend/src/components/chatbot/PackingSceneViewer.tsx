@@ -1,23 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { SceneData } from '../../types/workflow'
 
 interface PackingSceneViewerProps {
   sceneData?: SceneData
   containerName?: string
+  productMeshUrl?: string
   height?: string
 }
 
 export default function PackingSceneViewer({
   sceneData,
   containerName = 'Packaging Container',
+  productMeshUrl,
   height = 'h-64 sm:h-72',
 }: PackingSceneViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [wireframe, setWireframe] = useState(false)
   const [autoRotate, setAutoRotate] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
+  const [modelStatus, setModelStatus] = useState<'loading' | 'cad' | 'box_fallback'>('box_fallback')
 
   const controlsRef = useRef<OrbitControls | null>(null)
   const initialCamPos = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0))
@@ -29,6 +33,8 @@ export default function PackingSceneViewer({
   useEffect(() => {
     const container = mountRef.current
     if (!container || !containerDims) return
+    let isSubscribed = true
+    setModelStatus(productMeshUrl ? 'loading' : 'box_fallback')
 
     // 1. Scene setup
     const scene = new THREE.Scene()
@@ -132,6 +138,8 @@ export default function PackingSceneViewer({
 
     // 9. Placed Items inside container
     materialsRef.current = []
+    const fallbackItemsGroup = new THREE.Group()
+    const cadItemsGroup = new THREE.Group()
 
     items.forEach((item) => {
       const itemDims = item.dimensions || { length: 50, width: 50, height: 50 }
@@ -164,7 +172,7 @@ export default function PackingSceneViewer({
       const posZ = (item.position?.y ?? 0) - cCenterY
 
       itemMesh.position.set(posX, posY, posZ)
-      rootGroup.add(itemMesh)
+      fallbackItemsGroup.add(itemMesh)
 
       // Add crisp edges to item
       const itemEdgesGeo = new THREE.EdgesGeometry(itemGeo)
@@ -175,10 +183,70 @@ export default function PackingSceneViewer({
       })
       const itemEdges = new THREE.LineSegments(itemEdgesGeo, itemEdgesMat)
       itemEdges.position.copy(itemMesh.position)
-      rootGroup.add(itemEdges)
+      fallbackItemsGroup.add(itemEdges)
     })
 
+    rootGroup.add(fallbackItemsGroup)
+    rootGroup.add(cadItemsGroup)
     scene.add(rootGroup)
+
+    if (productMeshUrl) {
+      new GLTFLoader().load(
+        productMeshUrl,
+        (gltf) => {
+          if (!isSubscribed) return
+
+          const sourceBounds = new THREE.Box3().setFromObject(gltf.scene)
+          const sourceSize = new THREE.Vector3()
+          const sourceCenter = new THREE.Vector3()
+          sourceBounds.getSize(sourceSize)
+          sourceBounds.getCenter(sourceCenter)
+
+          if (sourceSize.x <= 0 || sourceSize.y <= 0 || sourceSize.z <= 0) {
+            setModelStatus('box_fallback')
+            return
+          }
+
+          items.forEach((item) => {
+            const itemDims = item.dimensions || { length: 50, width: 50, height: 50 }
+            const itemL = Number(itemDims.length) || 50
+            const itemW = Number(itemDims.width) || 50
+            const itemH = Number(itemDims.height) || 50
+            const itemGroup = new THREE.Group()
+            itemGroup.position.set(
+              (item.position?.x ?? 0) + itemL / 2 - cCenterX,
+              (item.position?.z ?? 0) + itemH / 2 - cCenterZ,
+              (item.position?.y ?? 0) + itemW / 2 - cCenterY,
+            )
+
+            const model = gltf.scene.clone(true)
+            model.scale.set(itemL / sourceSize.x, itemH / sourceSize.y, itemW / sourceSize.z)
+            model.position.set(
+              -sourceCenter.x * model.scale.x,
+              -sourceCenter.y * model.scale.y,
+              -sourceCenter.z * model.scale.z,
+            )
+            model.traverse((object) => {
+              if (object instanceof THREE.Mesh) {
+                object.castShadow = true
+                object.receiveShadow = true
+              }
+            })
+            itemGroup.add(model)
+            cadItemsGroup.add(itemGroup)
+          })
+
+          fallbackItemsGroup.visible = false
+          setModelStatus('cad')
+        },
+        undefined,
+        (error) => {
+          if (!isSubscribed) return
+          console.warn('Product CAD mesh unavailable; showing dimension-accurate boxes instead.', error)
+          setModelStatus('box_fallback')
+        },
+      )
+    }
 
     // 10. Animation Loop
     let animationFrameId: number
@@ -205,6 +273,7 @@ export default function PackingSceneViewer({
 
     // Teardown
     return () => {
+      isSubscribed = false
       cancelAnimationFrame(animationFrameId)
       resizeObserver.disconnect()
       controls.dispose()
@@ -213,7 +282,7 @@ export default function PackingSceneViewer({
         container.removeChild(renderer.domElement)
       }
     }
-  }, [containerDims, items, isExpanded])
+  }, [containerDims, items, isExpanded, productMeshUrl])
 
   // Update wireframe mode dynamically
   useEffect(() => {
@@ -257,6 +326,9 @@ export default function PackingSceneViewer({
         </span>
         <span className="hidden sm:inline-flex px-2 py-1 text-[11px] font-medium text-slate-500 bg-white/90 backdrop-blur-xs border border-slate-200/80 rounded-md shadow-2xs">
           {items.length} placed items
+        </span>
+        <span className="hidden sm:inline-flex px-2 py-1 text-[11px] font-medium text-slate-500 bg-white/90 backdrop-blur-xs border border-slate-200/80 rounded-md shadow-2xs">
+          {modelStatus === 'loading' ? 'Loading product model…' : modelStatus === 'cad' ? 'CAD model' : 'Dimension box'}
         </span>
       </div>
 
@@ -323,4 +395,3 @@ export default function PackingSceneViewer({
     </div>
   )
 }
-

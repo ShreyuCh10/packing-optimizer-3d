@@ -227,9 +227,13 @@ export default function PackageModal({ pkg, onClose }: PackageModalProps) {
 
               <div className="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
                 <dt className="text-slate-500 font-medium">Inventory Status</dt>
-                <dd className="mt-1 sm:mt-0 sm:col-span-2 text-emerald-700 font-medium flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  {pkg.inventory ?? 25} units available in warehouse
+                <dd className={`mt-1 sm:mt-0 sm:col-span-2 font-medium flex items-center gap-2 ${
+                  pkg.inventory == null ? 'text-slate-600' : 'text-emerald-700'
+                }`}>
+                  {pkg.inventory != null && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+                  {pkg.inventory == null
+                    ? 'Stock not specified in source dataset'
+                    : `${pkg.inventory} units available in warehouse`}
                 </dd>
               </div>
             </dl>
@@ -253,4 +257,3 @@ export default function PackageModal({ pkg, onClose }: PackageModalProps) {
     </div>
   )
 }
-

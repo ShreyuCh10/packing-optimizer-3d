@@ -20,7 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     key: 'packages',
     label: 'Packages',
-    description: 'Carton and box inventory, stock levels, and weight capacities.',
+    description: 'Package dimensions and rated payloads; stock is shown only when supplied.',
   },
   {
     key: 'optimiser',

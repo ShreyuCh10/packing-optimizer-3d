@@ -73,7 +73,7 @@ class ContainerSpec(BaseModel):
     width: float = Field(..., gt=0, description="Internal width in mm")
     height: float = Field(..., gt=0, description="Internal height in mm")
     max_weight_capacity_kg: Optional[float] = Field(default=1000.0, description="Max weight capacity in kg")
-    inventory: Optional[int] = Field(default=25, description="Available stock count")
+    inventory: Optional[int] = Field(default=None, description="Available stock count, if provided")
 
 
 class PackingOptimizerInput(BaseModel):
@@ -361,8 +361,17 @@ def pack_single_container_extreme_points(
         best_orient_dict = None
 
     packing_result = {
+        "candidate_id": str(
+            container.get("package_code")
+            or container.get("package_id")
+            or c_name
+        ),
+        "package_id": container.get("package_id"),
+        "package_code": container.get("package_code"),
         "container_name": c_name,
         "category": container.get("category", "carton"),
+        "material": container.get("material"),
+        "inventory": container.get("inventory"),
         "container_dimensions": {
             "length": c_l,
             "width": c_w,
@@ -503,11 +512,15 @@ def resolve_candidate_containers(
         return [
             {
                 "name": c.get("name") or c.get("package") or f"Box_{i + 1}",
+                "package_id": c.get("package_id"),
+                "package_code": c.get("package_code"),
                 "category": c.get("category", "carton"),
                 "inner_length_mm": float(c.get("inner_length_mm") or c.get("length", 300.0)),
                 "inner_width_mm": float(c.get("inner_width_mm") or c.get("width", 200.0)),
                 "inner_height_mm": float(c.get("inner_height_mm") or c.get("height", 100.0)),
                 "max_weight_capacity_kg": float(c.get("max_weight_capacity_kg") or c.get("max_weight_kg", 1000.0)),
+                "material": c.get("material"),
+                "inventory": c.get("inventory"),
             }
             for i, c in enumerate(data["candidate_containers"])
         ]
@@ -517,11 +530,15 @@ def resolve_candidate_containers(
         c = data["container"]
         return [{
             "name": c.get("name") or c.get("package") or "Container",
+            "package_id": c.get("package_id"),
+            "package_code": c.get("package_code"),
             "category": c.get("category", "carton"),
             "inner_length_mm": float(c.get("inner_length_mm") or c.get("length", 300.0)),
             "inner_width_mm": float(c.get("inner_width_mm") or c.get("width", 200.0)),
             "inner_height_mm": float(c.get("inner_height_mm") or c.get("height", 100.0)),
             "max_weight_capacity_kg": float(c.get("max_weight_capacity_kg") or c.get("max_weight_kg", 1000.0)),
+            "material": c.get("material"),
+            "inventory": c.get("inventory"),
         }]
 
     # 3. Auto-fetch top narrowed packages from retrieval_gathering / SQLite database
@@ -547,11 +564,15 @@ def resolve_candidate_containers(
                     inner_dims = p.get("inner_dimensions_mm", {})
                     candidates.append({
                         "name": p.get("name"),
+                        "package_id": p.get("package_id"),
+                        "package_code": p.get("package_code"),
                         "category": p.get("category", "carton"),
                         "inner_length_mm": float(inner_dims.get("length", 300.0)),
                         "inner_width_mm": float(inner_dims.get("width", 200.0)),
                         "inner_height_mm": float(inner_dims.get("height", 100.0)),
                         "max_weight_capacity_kg": float(p.get("max_weight_capacity_kg", 9.0)),
+                        "material": p.get("material"),
+                        "inventory": p.get("inventory"),
                     })
                 return candidates
         except Exception:
@@ -665,7 +686,12 @@ def evaluate_and_rank_node(state: PackingOptimizerState) -> Dict[str, Any]:
         "best_evaluation": best,
         "best_container": {
             "name": best.get("container_name"),
+            "candidate_id": best.get("candidate_id"),
+            "package_id": best.get("package_id"),
+            "package_code": best.get("package_code"),
             "category": best.get("category"),
+            "material": best.get("material"),
+            "inventory": best.get("inventory"),
             "inner_dimensions_mm": {
                 "length": c_dims.get("length", 0.0),
                 "width": c_dims.get("width", 0.0),
@@ -803,4 +829,3 @@ if __name__ == "__main__":
     print("\n" + "=" * 75)
     print("All Packing Optimizer Agent tests completed successfully!")
     print("=" * 75)
-
