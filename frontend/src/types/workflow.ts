@@ -104,6 +104,13 @@ export interface BestOrientation {
   count_at_this_orientation: number
 }
 
+export interface OrientationBreakdown {
+  dimensions: { length: number; width: number; height: number }
+  count: number
+  percentage: number
+  item_ids?: string[]
+}
+
 export interface ToolExecutionStep {
   id: string
   tool_name: string
@@ -118,6 +125,32 @@ export interface ToolExecutionStep {
   outputs?: Record<string, any>
 }
 
+export interface ContainerPackingEvaluation {
+  container_name: string
+  category?: string
+  container_dimensions?: {
+    length: number
+    width: number
+    height: number
+    volume_liters?: number
+  }
+  max_weight_capacity_kg?: number
+  total_packed_weight_kg?: number
+  weight_within_limit?: boolean
+  fits: boolean
+  placed_count: number
+  unplaced_count: number
+  total_items: number
+  volume_utilization_pct: number
+  wasted_volume_liters: number
+  bounding_box_utilization_pct?: number
+  best_orientation?: BestOrientation | null
+  orientations_breakdown?: OrientationBreakdown[]
+  placed_items?: PlacedItem[]
+  unplaced_items?: any[]
+  scene_data?: SceneData
+}
+
 export interface WorkflowResult {
   status: string
   stage: 'requirement_gathering' | 'hitl' | 'retrieval_gathering' | 'packing_optimization' | string
@@ -130,9 +163,11 @@ export interface WorkflowResult {
   fits: boolean
   best_container?: CandidatePackage | null
   best_orientation?: BestOrientation | null
+  orientations_breakdown?: OrientationBreakdown[]
   utilization_metrics?: UtilizationMetrics | null
   placed_items?: PlacedItem[]
   unplaced_items?: any[]
+  all_evaluations?: ContainerPackingEvaluation[]
   scene_data?: SceneData
   steps?: ToolExecutionStep[]
 }

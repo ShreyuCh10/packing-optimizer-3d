@@ -3,6 +3,7 @@ import type { WorkflowResult } from '../../types/workflow'
 import WorkflowStepProgress from './WorkflowStepProgress'
 import PackingSceneViewer from './PackingSceneViewer'
 import ToolExecutionTrace from './ToolExecutionTrace'
+import PlacedPartsManifest from './PlacedPartsManifest'
 
 interface WorkflowMessageCardProps {
   result: WorkflowResult
@@ -14,13 +15,27 @@ export default function WorkflowMessageCard({
   onApplyPrompt,
 }: WorkflowMessageCardProps) {
   const [activeTab, setActiveTab] = useState<'3d' | 'candidates' | 'specs'>('3d')
+  const [selectedContainerName, setSelectedContainerName] = useState<string | null>(null)
 
   const req = result.requirements ?? {}
   const metrics = result.metrics ?? {}
   const candidates = result.candidate_packages ?? []
-  const util = result.utilization_metrics
+  const allEvals = result.all_evaluations ?? []
   const bestCont = result.best_container
-  const bestDims =
+
+  // If user selected a specific container, find its Extreme Point evaluation
+  const activeEval =
+    (selectedContainerName && allEvals.find((e) => e.container_name === selectedContainerName)) ||
+    (bestCont && allEvals.find((e) => e.container_name === bestCont.name)) ||
+    allEvals[0] ||
+    null
+
+  const isWinner = Boolean(activeEval && bestCont && activeEval.container_name === bestCont.name)
+  const activeContName = activeEval?.container_name || bestCont?.name || 'Container'
+  const activeCategory = activeEval?.category || bestCont?.category || 'carton'
+
+  const activeDims =
+    activeEval?.container_dimensions ||
     bestCont?.inner_dimensions_mm ||
     bestCont?.dimensions ||
     result.scene_data?.container?.dimensions || {
@@ -28,9 +43,31 @@ export default function WorkflowMessageCard({
       width: 0,
       height: 0,
     }
-  const bestOrient = result.best_orientation
+
+  const activeMaxWeight = activeEval?.max_weight_capacity_kg ?? bestCont?.max_weight_capacity_kg ?? 0
+  const activeSceneData = activeEval?.scene_data || result.scene_data
+  const hasScene = Boolean(activeSceneData?.container?.dimensions)
+
+  const activeUtil = activeEval
+    ? {
+        total_items: activeEval.total_items,
+        placed_count: activeEval.placed_count,
+        unplaced_count: activeEval.unplaced_count,
+        container_volume_liters: activeEval.container_dimensions?.volume_liters || 0,
+        items_volume_liters:
+          Math.round(
+            ((activeEval.container_dimensions?.volume_liters || 0) * (activeEval.volume_utilization_pct / 100)) * 100
+          ) / 100,
+        volume_utilization_pct: activeEval.volume_utilization_pct,
+        wasted_volume_liters: activeEval.wasted_volume_liters,
+        total_packed_weight_kg: activeEval.total_packed_weight_kg || 0,
+      }
+    : result.utilization_metrics
+
+  const activePlacedItems = activeEval?.placed_items || result.placed_items
+  const activeOrientationsBreakdown = activeEval?.orientations_breakdown || result.orientations_breakdown
+  const activeBestOrientation = activeEval?.best_orientation || result.best_orientation
   const isHitl = result.hitl_required
-  const hasScene = Boolean(result.scene_data?.container?.dimensions)
 
   const partName = req.name || metrics.part_name || 'Part'
   const snp = req.snp || metrics.snp || 1
@@ -142,9 +179,9 @@ export default function WorkflowMessageCard({
                   <path strokeLinecap="round" strokeLinejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
                 </svg>
                 <span>3D Packing Solution</span>
-                {util && (
+                {activeUtil && (
                   <span className="ml-1 text-[10px] font-bold px-1.5 py-0.2 bg-white/20 rounded">
-                    {util.volume_utilization_pct}%
+                    {activeUtil.volume_utilization_pct}%
                   </span>
                 )}
               </button>
@@ -183,10 +220,10 @@ export default function WorkflowMessageCard({
               </button>
             </div>
 
-            {bestCont && (
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Selected: {bestCont.name}
+            {activeContName && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-sky-800 bg-sky-50 border border-sky-200/80 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                Active View: {activeContName}
               </span>
             )}
           </div>
@@ -194,40 +231,106 @@ export default function WorkflowMessageCard({
           {/* TAB 1: 3D Extreme Point Packing Viewer & Metrics */}
           {activeTab === '3d' && (
             <div className="p-4 space-y-4">
-              {/* Winner Header Banner */}
-              {bestCont && (
+              {/* Target Box Selector Pill Buttons */}
+              {allEvals.length > 1 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-slate-600 font-semibold uppercase tracking-wider">
+                    <span>Extreme Point Target Box (Switch 3D View):</span>
+                    <span className="text-[10px] text-slate-400 font-normal lowercase">
+                      {allEvals.length} evaluated containers
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {allEvals.map((ev) => {
+                      const isSelected = ev.container_name === activeContName
+                      const isOptWinner = ev.container_name === bestCont?.name
+
+                      return (
+                        <button
+                          key={ev.container_name}
+                          type="button"
+                          onClick={() => setSelectedContainerName(ev.container_name)}
+                          className={`text-xs px-2.5 py-1 rounded-lg font-medium cursor-pointer transition-all flex items-center gap-1.5 border ${
+                            isSelected
+                              ? 'bg-sky-600 text-white border-sky-600 shadow-xs ring-2 ring-sky-200'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                          }`}
+                        >
+                          {isOptWinner && <span title="Recommended Winner">🏆</span>}
+                          <span>{ev.container_name}</span>
+                          <span
+                            className={`text-[10px] font-semibold px-1.5 py-0.2 rounded-full ${
+                              isSelected
+                                ? 'bg-sky-700 text-sky-100'
+                                : ev.fits
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}
+                          >
+                            {ev.fits ? `${ev.volume_utilization_pct}%` : `${ev.placed_count}/${ev.total_items} fit`}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Partial Fit / Weight Violation Warning Banner */}
+              {activeEval && !activeEval.fits && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-amber-900">
+                  <span className="text-base leading-none mt-0.5">⚠️</span>
+                  <div className="space-y-0.5">
+                    <div className="font-bold">
+                      Partial Fit in {activeContName}: Placed {activeEval.placed_count} of {activeEval.total_items} items
+                    </div>
+                    <div className="text-[11px] text-amber-800">
+                      {activeEval.unplaced_count} item(s) could not fit inside this container due to dimension limits or extreme point collision.
+                      {!activeEval.weight_within_limit && (
+                        <span className="ml-1 text-rose-700 font-semibold">
+                          (Exceeded max payload capacity of {activeMaxWeight} kg).
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Container Header Banner */}
+              {activeContName && (
                 <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-lg bg-sky-600 text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
-                      🏆
+                      {isWinner ? '🏆' : '📦'}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-slate-900">
-                          {bestCont.name}
+                          {activeContName}
                         </span>
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                          {bestCont.category}
+                          {activeCategory}
                         </span>
-                        {bestCont.tier_label && (
-                          <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
-                            {bestCont.tier_label}
+                        {isWinner && (
+                          <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                            Recommended Winner
                           </span>
                         )}
                       </div>
                       <div className="text-xs text-slate-600 mt-0.5">
                         Inner:{' '}
-                        {bestDims.length}×{bestDims.width}×{bestDims.height} mm • Max Payload:{' '}
-                        {bestCont.max_weight_capacity_kg} kg
+                        {activeDims.length}×{activeDims.width}×{activeDims.height} mm • Max Payload:{' '}
+                        {activeMaxWeight} kg
                       </div>
                     </div>
                   </div>
 
-                  {util && (
+                  {activeUtil && (
                     <div className="text-right">
                       <div className="text-xs font-semibold text-slate-500">Volume Utilization</div>
                       <div className="text-lg font-bold text-sky-700">
-                        {util.volume_utilization_pct}%
+                        {activeUtil.volume_utilization_pct}%
                       </div>
                     </div>
                   )}
@@ -239,15 +342,15 @@ export default function WorkflowMessageCard({
                 <div>
                   <div className="flex items-center justify-between mb-1.5 px-0.5">
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Interactive 3D Packing View (Three.js)
+                      Interactive 3D Packing View (Three.js) — {activeContName}
                     </span>
                     <span className="text-[11px] text-slate-500">
                       Left drag: rotate • Scroll: zoom • Right drag: pan
                     </span>
                   </div>
                   <PackingSceneViewer
-                    sceneData={result.scene_data}
-                    containerName={bestCont?.name || 'Container'}
+                    sceneData={activeSceneData}
+                    containerName={activeContName}
                   />
                 </div>
               ) : (
@@ -257,17 +360,17 @@ export default function WorkflowMessageCard({
               )}
 
               {/* Packing Analysis Metrics Grid */}
-              {util && (
+              {activeUtil && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                       Placed Items
                     </div>
                     <div className="text-sm font-bold text-slate-900 mt-0.5">
-                      {util.placed_count} / {util.total_items}
+                      {activeUtil.placed_count} / {activeUtil.total_items}
                     </div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">
-                      0 Clashes detected
+                    <div className={`text-[10px] font-medium mt-0.5 ${activeUtil.placed_count === activeUtil.total_items ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {activeUtil.placed_count === activeUtil.total_items ? '0 Clashes detected' : `${activeUtil.unplaced_count ?? 0} Unplaced`}
                     </div>
                   </div>
 
@@ -276,10 +379,10 @@ export default function WorkflowMessageCard({
                       Volume Used
                     </div>
                     <div className="text-sm font-bold text-sky-700 mt-0.5">
-                      {util.volume_utilization_pct}%
+                      {activeUtil.volume_utilization_pct}%
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
-                      {util.items_volume_liters} L / {util.container_volume_liters} L
+                      {activeUtil.items_volume_liters} L / {activeUtil.container_volume_liters} L
                     </div>
                   </div>
 
@@ -288,7 +391,7 @@ export default function WorkflowMessageCard({
                       Void / Waste
                     </div>
                     <div className="text-sm font-bold text-slate-800 mt-0.5">
-                      {util.wasted_volume_liters} L
+                      {activeUtil.wasted_volume_liters} L
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
                       Clearance space
@@ -300,7 +403,7 @@ export default function WorkflowMessageCard({
                       Packed Weight
                     </div>
                     <div className="text-sm font-bold text-slate-900 mt-0.5">
-                      {util.total_packed_weight_kg} kg
+                      {activeUtil.total_packed_weight_kg} kg
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
                       Payload weight
@@ -309,20 +412,13 @@ export default function WorkflowMessageCard({
                 </div>
               )}
 
-              {/* Best Orientation Pill */}
-              {bestOrient && (
-                <div className="flex items-center gap-2 text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700">
-                  <span className="font-semibold text-slate-800">
-                    Optimal Part Orientation:
-                  </span>
-                  <span className="font-mono bg-white border border-slate-200 px-2 py-0.5 rounded text-sky-800 font-bold">
-                    {bestOrient.length} × {bestOrient.width} × {bestOrient.height} mm
-                  </span>
-                  <span className="text-slate-500 text-[11px]">
-                    ({bestOrient.count_at_this_orientation} units packed at this primary angle)
-                  </span>
-                </div>
-              )}
+              {/* Placed Parts Manifest & All Orientations Breakdown */}
+              <PlacedPartsManifest
+                placedItems={activePlacedItems}
+                sceneItems={activeSceneData?.items}
+                orientationsBreakdown={activeOrientationsBreakdown}
+                bestOrientation={activeBestOrientation}
+              />
             </div>
           )}
 
@@ -396,6 +492,19 @@ export default function WorkflowMessageCard({
                           </div>
                         )}
                       </div>
+
+                      {/* Action Button: Perform / View 3D Extreme Point Packing */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedContainerName(cand.name)
+                          setActiveTab('3d')
+                        }}
+                        className="w-full mt-2.5 text-xs font-semibold py-1.5 px-3 rounded-lg border border-sky-300 bg-sky-50/80 text-sky-800 hover:bg-sky-100 hover:border-sky-400 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <span>View 3D Extreme Point Packing</span>
+                        <span aria-hidden="true">→</span>
+                      </button>
                     </div>
                   )
                 })}
