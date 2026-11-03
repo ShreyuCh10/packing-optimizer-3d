@@ -74,6 +74,7 @@ class UnifiedPackagingWorkflowState(TypedDict, total=False):
     utilization_metrics: Optional[Dict[str, Any]]
     placed_items: Optional[List[Dict[str, Any]]]
     unplaced_items: Optional[List[Dict[str, Any]]]
+    all_evaluations: Optional[List[Dict[str, Any]]]
     scene_data: Optional[Dict[str, Any]]
 
     # Final Combined Status & Execution Steps
@@ -304,6 +305,7 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
         "utilization_metrics": utilization_metrics,
         "placed_items": placed_items,
         "unplaced_items": unplaced_items,
+        "all_evaluations": packing_result.get("all_evaluations", []),
         "scene_data": scene_data,
         "status": status,
         "summary": narrative,
@@ -561,6 +563,7 @@ def run_unified_workflow(
         "utilization_metrics": result.get("utilization_metrics"),
         "placed_items": result.get("placed_items", []),
         "unplaced_items": result.get("unplaced_items", []),
+        "all_evaluations": result.get("all_evaluations", []),
         "scene_data": result.get("scene_data", {}),
         "steps": steps,
     }
