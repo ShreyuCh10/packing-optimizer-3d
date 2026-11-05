@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { WorkflowResult } from '../../types/workflow'
-import WorkflowStepProgress from './WorkflowStepProgress'
 import PackingSceneViewer from './PackingSceneViewer'
 import ToolExecutionTrace from './ToolExecutionTrace'
 import PlacedPartsManifest from './PlacedPartsManifest'
@@ -63,6 +62,7 @@ export default function WorkflowMessageCard({
         volume_utilization_pct: activeEval.volume_utilization_pct,
         wasted_volume_liters: activeEval.wasted_volume_liters,
         total_packed_weight_kg: activeEval.total_packed_weight_kg || 0,
+        max_utilization: activeEval.max_utilization || util?.max_utilization,
       }
     : util
 
@@ -82,24 +82,6 @@ export default function WorkflowMessageCard({
 
   return (
     <div className="w-full space-y-3.5">
-      {/* 1. Multi-Agent Step Progress Pipeline */}
-      <WorkflowStepProgress
-        currentStage={result.stage}
-        status={result.status}
-        hitlRequired={isHitl}
-      />
-
-      {/* 2. Executive Summary / Conversational Narrative */}
-      <div className="text-sm text-slate-800 leading-relaxed bg-white border border-slate-200/90 rounded-xl p-3.5 shadow-2xs">
-        <div className="flex items-start gap-2.5">
-          <div className="w-6 h-6 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs">
-            🤖
-          </div>
-          <div className="flex-1 whitespace-pre-wrap">
-            {result.assistant_response || result.summary || 'Unified packaging workflow executed.'}
-          </div>
-        </div>
-      </div>
 
       {/* 3. Human-In-The-Loop Clarification Banner (if HITL required) */}
       {isHitl && (
@@ -237,51 +219,6 @@ export default function WorkflowMessageCard({
           {/* TAB 1: 3D Extreme Point Packing Viewer & Metrics */}
           {activeTab === '3d' && (
             <div className="p-4 space-y-4">
-              {/* Target Box Selector Pill Buttons */}
-              {allEvals.length > 1 && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] text-slate-600 font-semibold uppercase tracking-wider">
-                    <span>Extreme Point Target Box (Switch 3D View):</span>
-                    <span className="text-[10px] text-slate-400 font-normal lowercase">
-                      {allEvals.length} evaluated containers
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5">
-                    {allEvals.map((ev) => {
-                      const isSelected = ev.container_name === activeContName
-                      const isOptWinner = ev.container_name === bestCont?.name
-
-                      return (
-                        <button
-                          key={ev.container_name}
-                          type="button"
-                          onClick={() => setSelectedContainerName(ev.container_name)}
-                          className={`text-xs px-2.5 py-1 rounded-lg font-medium cursor-pointer transition-all flex items-center gap-1.5 border ${
-                            isSelected
-                              ? 'bg-sky-600 text-white border-sky-600 shadow-xs ring-2 ring-sky-200'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
-                          }`}
-                        >
-                          {isOptWinner && <span title="Recommended Winner">🏆</span>}
-                          <span>{ev.container_name}</span>
-                          <span
-                            className={`text-[10px] font-semibold px-1.5 py-0.2 rounded-full ${
-                              isSelected
-                                ? 'bg-sky-700 text-sky-100'
-                                : ev.fits
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {ev.fits ? `${ev.volume_utilization_pct}%` : `${ev.placed_count}/${ev.total_items} fit`}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
 
               {/* Partial Fit / Weight Violation Warning Banner */}
               {activeEval && !activeEval.fits && (
@@ -445,6 +382,71 @@ export default function WorkflowMessageCard({
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
                       Payload weight
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Row 2: Maximum Container Utilisation Grid */}
+              {activeUtil?.max_utilization && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between px-0.5">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                      Maximum Container Utilisation (Full Capacity)
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Density & full load metrics
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="bg-indigo-50/40 border border-indigo-100 rounded-lg p-2.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700">
+                        Max Part Capacity
+                      </div>
+                      <div className="text-sm font-bold text-indigo-950 mt-0.5">
+                        {activeUtil.max_utilization.max_parts} units
+                      </div>
+                      <div className="text-[10px] font-medium text-indigo-600 mt-0.5">
+                        Maximum physical fit
+                      </div>
+                    </div>
+
+                    <div className="bg-indigo-50/40 border border-indigo-100 rounded-lg p-2.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700">
+                        Max Volume Occupancy
+                      </div>
+                      <div className="text-sm font-bold text-indigo-950 mt-0.5">
+                        {activeUtil.max_utilization.max_volume_utilization_pct}%
+                      </div>
+                      <div className="text-[10px] text-indigo-600 mt-0.5">
+                        {activeUtil.max_utilization.max_items_volume_liters} L / {activeUtil.max_utilization.container_volume_liters || activeUtil.container_volume_liters} L
+                      </div>
+                    </div>
+
+                    <div className="bg-indigo-50/40 border border-indigo-100 rounded-lg p-2.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700">
+                        Remaining Volume at Max
+                      </div>
+                      <div className="text-sm font-bold text-indigo-950 mt-0.5">
+                        {activeUtil.max_utilization.max_wasted_volume_liters} L
+                      </div>
+                      <div className="text-[10px] text-indigo-600 mt-0.5">
+                        Unoccupied at max density
+                      </div>
+                    </div>
+
+                    <div className="bg-indigo-50/40 border border-indigo-100 rounded-lg p-2.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700">
+                        Max Packed Weight
+                      </div>
+                      <div className="text-sm font-bold text-indigo-950 mt-0.5">
+                        {activeUtil.max_utilization.max_packed_weight_kg} kg
+                      </div>
+                      <div className={`text-[10px] font-medium mt-0.5 ${activeUtil.max_utilization.weight_within_limit ? 'text-emerald-600' : 'text-amber-700'}`}>
+                        {activeUtil.max_utilization.weight_within_limit ? 'Within payload limit' : `Payload limit: ${activeUtil.max_utilization.max_weight_capacity_kg || activeMaxWeight} kg`}
+                      </div>
                     </div>
                   </div>
                 </div>

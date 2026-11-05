@@ -3,6 +3,7 @@ import type { Product } from '../../types/customBox'
 import { fetchProducts } from '../../services/productsApi'
 import ProductCard from './ProductCard'
 import ProductModal from './ProductModal'
+import AddProductModal from './AddProductModal'
 
 export default function ProductsView() {
   const [products, setProducts] = useState<Product[]>([])
@@ -11,6 +12,7 @@ export default function ProductsView() {
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [selectedType, setSelectedType] = useState<string>('All')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false)
 
   const loadProducts = async () => {
     setLoading(true)
@@ -69,28 +71,47 @@ export default function ProductsView() {
           </p>
         </div>
 
-        {/* Primary Interactive Refresh Button */}
-        <button
-          type="button"
-          onClick={loadProducts}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-sky-700 bg-sky-50/70 border border-sky-200 rounded-md hover:bg-sky-100 hover:text-sky-900 active:scale-[0.98] transition-all duration-150 cursor-pointer self-start sm:self-auto disabled:opacity-50 shadow-2xs"
-        >
-          <svg
-            className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
+        {/* Action Buttons: Add New Product & Refresh */}
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setIsAddModalOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-sky-600 rounded-md hover:bg-sky-700 active:scale-[0.98] transition-all duration-150 cursor-pointer shadow-2xs"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
-            />
-          </svg>
-          Refresh Data
-        </button>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add New Product
+          </button>
+
+          <button
+            type="button"
+            onClick={loadProducts}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-sky-700 bg-sky-50/70 border border-sky-200 rounded-md hover:bg-sky-100 hover:text-sky-900 active:scale-[0.98] transition-all duration-150 cursor-pointer disabled:opacity-50 shadow-2xs"
+          >
+            <svg
+              className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+              />
+            </svg>
+            Refresh Data
+          </button>
+        </div>
       </div>
 
       {/* Search & Filter Toolbar */}
@@ -242,6 +263,13 @@ export default function ProductsView() {
       <ProductModal
         product={selectedProduct}
         onClose={() => setSelectedProduct(null)}
+      />
+
+      {/* Add New Product Modal */}
+      <AddProductModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onProductAdded={loadProducts}
       />
     </div>
   )

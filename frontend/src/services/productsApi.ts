@@ -38,3 +38,44 @@ export async function fetchProductByIdOrName(idOrName: string | number): Promise
   return res.json();
 }
 
+
+
+export async function createProduct(productData: Partial<Product>): Promise<{ success: boolean; message: string; product: Product }> {
+  const res = await fetch(`${API_BASE}/products`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(productData),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to create product: ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
+export async function uploadProductsCsv(file: File): Promise<{
+  success: boolean;
+  message: string;
+  added_count: number;
+  total_processed: number;
+  errors: string[];
+}> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/products/upload-csv`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to upload CSV: ${res.statusText}`);
+  }
+
+  return res.json();
+}

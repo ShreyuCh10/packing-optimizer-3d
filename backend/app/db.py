@@ -179,6 +179,147 @@ def get_product_by_id(product_id: int, db_path: Optional[str] = None) -> Optiona
         conn.close()
 
 
+def insert_product(product_data: Dict[str, Any], db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Insert a single product into SQLite database.
+    
+    If part_name already exists, updates the product with new specifications.
+    """
+    conn = get_db_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.cursor()
+            name = str(product_data.get("part_name") or product_data.get("name", "")).strip()
+            if not name:
+                raise ValueError("part_name is required")
+
+            cursor.execute(
+                """
+                INSERT INTO products (
+                    part_name,
+                    part_length,
+                    part_breadth,
+                    part_height,
+                    part_weight,
+                    part_type,
+                    standard_no_of_parts,
+                    domestic_or_international,
+                    per_day_requirement,
+                    minimum_order_quantity,
+                    line_feeding_method,
+                    model_file
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(part_name) DO UPDATE SET
+                    part_length=excluded.part_length,
+                    part_breadth=excluded.part_breadth,
+                    part_height=excluded.part_height,
+                    part_weight=excluded.part_weight,
+                    part_type=excluded.part_type,
+                    standard_no_of_parts=excluded.standard_no_of_parts,
+                    domestic_or_international=excluded.domestic_or_international,
+                    per_day_requirement=excluded.per_day_requirement,
+                    minimum_order_quantity=excluded.minimum_order_quantity,
+                    line_feeding_method=excluded.line_feeding_method,
+                    model_file=COALESCE(excluded.model_file, products.model_file)
+                """,
+                (
+                    name,
+                    float(product_data.get("part_length") or product_data.get("length", 100.0)),
+                    float(product_data.get("part_breadth") or product_data.get("part_width") or product_data.get("width", 50.0)),
+                    float(product_data.get("part_height") or product_data.get("height", 30.0)),
+                    float(product_data.get("part_weight") or product_data.get("weight", 0.5)),
+                    str(product_data.get("part_type") or product_data.get("material", "Standard")).strip(),
+                    int(product_data.get("standard_no_of_parts") or product_data.get("snp", 1)),
+                    str(product_data.get("domestic_or_international", "Domestic")).strip(),
+                    int(product_data.get("per_day_requirement", 100)),
+                    int(product_data.get("minimum_order_quantity") or product_data.get("moq", 1)),
+                    str(product_data.get("line_feeding_method", "Two-Bin System")).strip(),
+                    str(product_data.get("model_file") or "").strip() or None,
+                ),
+            )
+            cursor.execute("SELECT * FROM products WHERE LOWER(part_name) = LOWER(?) LIMIT 1", (name,))
+            row = cursor.fetchone()
+            return dict(row) if row else {"part_name": name, **product_data}
+    finally:
+        conn.close()
+
+
+def insert_products_batch(products_list: List[Dict[str, Any]], db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Insert or update a batch of products in SQLite database.
+    
+    Returns total processed count, added count, and any row errors.
+    """
+    conn = get_db_connection(db_path)
+    added_count = 0
+    errors: List[str] = []
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            for idx, p in enumerate(products_list):
+                try:
+                    name = str(p.get("part_name") or p.get("name", "")).strip()
+                    if not name:
+                        errors.append(f"Row {idx + 1}: Missing part name")
+                        continue
+
+                    cursor.execute(
+                        """
+                        INSERT INTO products (
+                            part_name,
+                            part_length,
+                            part_breadth,
+                            part_height,
+                            part_weight,
+                            part_type,
+                            standard_no_of_parts,
+                            domestic_or_international,
+                            per_day_requirement,
+                            minimum_order_quantity,
+                            line_feeding_method,
+                            model_file
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(part_name) DO UPDATE SET
+                            part_length=excluded.part_length,
+                            part_breadth=excluded.part_breadth,
+                            part_height=excluded.part_height,
+                            part_weight=excluded.part_weight,
+                            part_type=excluded.part_type,
+                            standard_no_of_parts=excluded.standard_no_of_parts,
+                            domestic_or_international=excluded.domestic_or_international,
+                            per_day_requirement=excluded.per_day_requirement,
+                            minimum_order_quantity=excluded.minimum_order_quantity,
+                            line_feeding_method=excluded.line_feeding_method,
+                            model_file=COALESCE(excluded.model_file, products.model_file)
+                        """,
+                        (
+                            name,
+                            float(p.get("part_length") or p.get("length", 100.0)),
+                            float(p.get("part_breadth") or p.get("part_width") or p.get("width", 50.0)),
+                            float(p.get("part_height") or p.get("height", 30.0)),
+                            float(p.get("part_weight") or p.get("weight", 0.5)),
+                            str(p.get("part_type") or p.get("material", "Standard")).strip(),
+                            int(p.get("standard_no_of_parts") or p.get("snp", 1)),
+                            str(p.get("domestic_or_international", "Domestic")).strip(),
+                            int(p.get("per_day_requirement", 100)),
+                            int(p.get("minimum_order_quantity") or p.get("moq", 1)),
+                            str(p.get("line_feeding_method", "Two-Bin System")).strip(),
+                            str(p.get("model_file") or "").strip() or None,
+                        ),
+                    )
+                    added_count += 1
+                except Exception as ex:
+                    errors.append(f"Row {idx + 1} ('{p.get('part_name', 'Unknown')}'): {str(ex)}")
+
+        return {
+            "success": True,
+            "added_count": added_count,
+            "total_processed": len(products_list),
+            "errors": errors,
+        }
+    finally:
+        conn.close()
+
+
 def get_all_packages(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Query all packages from SQLite database."""
     conn = get_db_connection(db_path)

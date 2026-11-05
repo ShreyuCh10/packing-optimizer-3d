@@ -379,6 +379,7 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
             "placed_count": selected_evaluation.get("placed_count"),
             "unplaced_count": selected_evaluation.get("unplaced_count"),
             "total_items": selected_evaluation.get("total_items"),
+            "max_utilization": selected_evaluation.get("max_utilization"),
         }
         placed_items = selected_evaluation.get("placed_items", [])
         unplaced_items = selected_evaluation.get("unplaced_items", [])

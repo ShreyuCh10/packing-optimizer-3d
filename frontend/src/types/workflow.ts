@@ -58,6 +58,17 @@ export interface PackageRecommendation {
   selection_factors: string[]
 }
 
+export interface MaxUtilizationMetrics {
+  max_parts: number
+  max_volume_utilization_pct: number
+  max_items_volume_liters: number
+  max_wasted_volume_liters: number
+  max_packed_weight_kg: number
+  container_volume_liters?: number
+  max_weight_capacity_kg?: number
+  weight_within_limit?: boolean
+}
+
 export interface UtilizationMetrics {
   total_items: number
   placed_count: number
@@ -69,6 +80,7 @@ export interface UtilizationMetrics {
   total_packed_weight_kg: number
   bounding_box_utilization_pct?: number
   packing_density_kg_per_m3?: number
+  max_utilization?: MaxUtilizationMetrics
 }
 
 export interface PlacedItem {
@@ -163,6 +175,7 @@ export interface ContainerPackingEvaluation {
   placed_items?: PlacedItem[]
   unplaced_items?: any[]
   scene_data?: SceneData
+  max_utilization?: MaxUtilizationMetrics
 }
 
 export interface WorkflowResult {

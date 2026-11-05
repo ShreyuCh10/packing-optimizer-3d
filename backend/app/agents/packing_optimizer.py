@@ -238,6 +238,93 @@ def generate_extreme_points(
     return valid_points
 
 
+def calculate_max_container_capacity(
+    container_l: float,
+    container_w: float,
+    container_h: float,
+    part_l: float,
+    part_w: float,
+    part_h: float,
+    part_weight: float = 0.0,
+    allow_rotation: bool = True,
+    keep_upright: bool = False,
+    max_weight_capacity_kg: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Calculate the maximum physical capacity of identical parts that can fit inside a container.
+
+    Evaluates full orthogonal orientations and residual slab arrangements along X, Y, and Z.
+    """
+    if part_l <= 0 or part_w <= 0 or part_h <= 0 or container_l <= 0 or container_w <= 0 or container_h <= 0:
+        return {
+            "max_parts": 0,
+            "max_volume_utilization_pct": 0.0,
+            "max_items_volume_liters": 0.0,
+            "max_wasted_volume_liters": 0.0,
+            "max_packed_weight_kg": 0.0,
+            "container_volume_liters": 0.0,
+            "max_weight_capacity_kg": max_weight_capacity_kg,
+            "weight_within_limit": True,
+        }
+
+    orients = get_possible_orientations(
+        part_l, part_w, part_h,
+        allow_rotation=allow_rotation,
+        keep_upright=keep_upright,
+    )
+
+    best_count = 0
+    for dx, dy, dz in orients:
+        nx = int(container_l // dx)
+        ny = int(container_w // dy)
+        nz = int(container_h // dz)
+        main_count = nx * ny * nz
+        if main_count == 0:
+            continue
+
+        rx = container_l - (nx * dx)
+        extra_x = 0
+        if rx > 0:
+            for edx, edy, edz in orients:
+                extra_x = max(extra_x, int(rx // edx) * int(container_w // edy) * int(container_h // edz))
+
+        ry = container_w - (ny * dy)
+        extra_y = 0
+        if ry > 0:
+            for edx, edy, edz in orients:
+                extra_y = max(extra_y, int(container_l // edx) * int(ry // edy) * int(container_h // edz))
+
+        rz = container_h - (nz * dz)
+        extra_z = 0
+        if rz > 0:
+            for edx, edy, edz in orients:
+                extra_z = max(extra_z, int(container_l // edx) * int(container_w // edy) * int(rz // edz))
+
+        total = max(main_count + extra_x, main_count + extra_y, main_count + extra_z)
+        if total > best_count:
+            best_count = total
+
+    cont_vol = container_l * container_w * container_h
+    cont_vol_l = round(cont_vol / 1_000_000.0, 3)
+    part_vol = part_l * part_w * part_h
+    max_items_vol = best_count * part_vol
+    max_items_vol_l = round(max_items_vol / 1_000_000.0, 3)
+    max_util_pct = round(min(100.0, (max_items_vol / max(1.0, cont_vol)) * 100.0), 2)
+    max_wasted_l = round(max(0.0, cont_vol_l - max_items_vol_l), 3)
+    max_wt = round(best_count * part_weight, 3)
+    wt_ok = (max_wt <= max_weight_capacity_kg) if max_weight_capacity_kg is not None else True
+
+    return {
+        "max_parts": best_count,
+        "max_volume_utilization_pct": max_util_pct,
+        "max_items_volume_liters": max_items_vol_l,
+        "max_wasted_volume_liters": max_wasted_l,
+        "max_packed_weight_kg": max_wt,
+        "container_volume_liters": cont_vol_l,
+        "max_weight_capacity_kg": max_weight_capacity_kg,
+        "weight_within_limit": wt_ok,
+    }
+
+
 def pack_single_container_extreme_points(
     container: Dict[str, Any],
     items: List[Dict[str, Any]],
@@ -394,6 +481,34 @@ def pack_single_container_extreme_points(
         "unplaced_items": unplaced,
         "extreme_points_evaluated_count": len(generate_extreme_points(placed, c_l, c_w, c_h)),
     }
+
+    # Calculate Maximum Container Utilisation Capacity
+    if items:
+        rep_it = items[0]
+        max_util = calculate_max_container_capacity(
+            container_l=c_l,
+            container_w=c_w,
+            container_h=c_h,
+            part_l=float(rep_it.get("length", 100.0)),
+            part_w=float(rep_it.get("width", 80.0)),
+            part_h=float(rep_it.get("height", 50.0)),
+            part_weight=float(rep_it.get("weight", 0.0)),
+            allow_rotation=rep_it.get("allow_rotation", allow_rotation),
+            keep_upright=rep_it.get("keep_upright", keep_upright),
+            max_weight_capacity_kg=max_wt,
+        )
+    else:
+        max_util = calculate_max_container_capacity(
+            container_l=c_l,
+            container_w=c_w,
+            container_h=c_h,
+            part_l=100.0,
+            part_w=80.0,
+            part_h=50.0,
+            part_weight=0.0,
+            max_weight_capacity_kg=max_wt,
+        )
+    packing_result["max_utilization"] = max_util
 
     # Generate Three.js Scene Data
     packing_result["scene_data"] = generate_scene_data(packing_result)
@@ -679,6 +794,7 @@ def evaluate_and_rank_node(state: PackingOptimizerState) -> Dict[str, Any]:
         "placed_count": best.get("placed_count"),
         "unplaced_count": best.get("unplaced_count"),
         "total_items": best.get("total_items"),
+        "max_utilization": best.get("max_utilization"),
     }
 
     c_dims = best.get("container_dimensions") or {}
