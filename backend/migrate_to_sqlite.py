@@ -323,6 +323,17 @@ def migrate_trucks(conn: sqlite3.Connection, csv_path: str, clean: bool = False)
     return count
 
 
+
+def migrate_cart(conn: sqlite3.Connection, csv_path: Optional[str] = None, clean: bool = False) -> int:
+    """Ensure cart table exists in database and is clean if requested."""
+    if clean:
+        conn.execute("DELETE FROM cart")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name='cart'")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM cart")
+    return cursor.fetchone()[0]
+
+
 MIGRATION_DISPATCH = {
     "products": migrate_products,
     "packages": migrate_packages,
@@ -330,6 +341,7 @@ MIGRATION_DISPATCH = {
     "metal_pallets": migrate_metal_pallets,
     "metal_stillages": migrate_metal_stillages,
     "trucks": migrate_trucks,
+    "cart": migrate_cart,
 }
 
 

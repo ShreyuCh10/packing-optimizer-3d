@@ -1,16 +1,33 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Product } from '../../types/customBox'
 import { getMaterialBadgeStyle } from '../../utils/materialBadges'
 import ProductMeshViewer from './ProductMeshViewer'
+import { addToCart } from '../../services/cartApi'
 
 interface ProductModalProps {
   product: Product | null
   onClose: () => void
+  onCartUpdated?: () => void
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
-export default function ProductModal({ product, onClose }: ProductModalProps) {
+export default function ProductModal({
+  product,
+  onClose,
+  onCartUpdated,
+}: ProductModalProps) {
+  const [quantity, setQuantity] = useState<number>(1)
+  const [addingToCart, setAddingToCart] = useState<boolean>(false)
+  const [addedFeedback, setAddedFeedback] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (product) {
+      setQuantity(product.standard_no_of_parts || 1)
+      setAddedFeedback(false)
+    }
+  }, [product])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -22,6 +39,31 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
   }, [onClose])
 
   if (!product) return null
+
+  const handleAddToCart = async () => {
+    setAddingToCart(true)
+    try {
+      await addToCart({
+        product_id: product.id,
+        part_name: product.part_name,
+        number_of_parts: quantity,
+        part_type: product.part_type,
+        part_length: product.part_length,
+        part_breadth: product.part_breadth,
+        part_height: product.part_height,
+        part_weight: product.part_weight,
+      })
+      setAddedFeedback(true)
+      onCartUpdated?.()
+      setTimeout(() => {
+        setAddedFeedback(false)
+      }, 1500)
+    } catch (err) {
+      console.error('Failed to add to cart:', err)
+    } finally {
+      setAddingToCart(false)
+    }
+  }
 
   const badgeStyle = getMaterialBadgeStyle(product.part_type)
   const hasModel = Boolean(product.model_file)
@@ -229,12 +271,76 @@ export default function ProductModal({ product, onClose }: ProductModalProps) {
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3 sticky bottom-0 z-20">
+        {/* Footer with Add to Cart controls & Close button */}
+        <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sticky bottom-0 z-20">
+          {/* Quantity Stepper & Add to Cart Button */}
+          <div className="flex items-center gap-2.5">
+            {/* Number Stepper: [-] [ quantity ] [+] */}
+            <div className="inline-flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                aria-label="Decrease parts quantity"
+                className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 active:bg-slate-200 transition-colors cursor-pointer text-sm font-bold select-none"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                min="1"
+                value={quantity}
+                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                aria-label="Quantity of parts"
+                className="w-14 py-1.5 text-center text-xs font-bold text-slate-900 border-x border-slate-200 focus:outline-none font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setQuantity((q) => q + 1)}
+                aria-label="Increase parts quantity"
+                className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 active:bg-slate-200 transition-colors cursor-pointer text-sm font-bold select-none"
+              >
+                +
+              </button>
+            </div>
+
+            {/* Add to Cart Button */}
+            <button
+              type="button"
+              onClick={handleAddToCart}
+              disabled={addingToCart}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold shadow-xs transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 ${
+                addedFeedback
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'bg-sky-600 text-white hover:bg-sky-700'
+              }`}
+            >
+              {addedFeedback ? (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  <span>Added {quantity} to Cart!</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"
+                    />
+                  </svg>
+                  <span>{addingToCart ? 'Adding…' : 'Add to Cart'}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Close Dialog Button */}
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-sky-600 text-white rounded-md text-sm font-medium hover:bg-sky-700 active:scale-[0.98] transition cursor-pointer shadow-xs"
+            className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg text-xs font-semibold active:scale-[0.98] transition cursor-pointer"
           >
             Close
           </button>

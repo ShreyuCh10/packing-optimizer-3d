@@ -139,6 +139,24 @@ def init_db(db_path: Optional[str] = None) -> None:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # 7. 'cart' table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cart (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER,
+                    part_name TEXT NOT NULL UNIQUE,
+                    part_type TEXT DEFAULT 'Standard',
+                    part_length REAL NOT NULL,
+                    part_breadth REAL NOT NULL,
+                    part_height REAL NOT NULL,
+                    part_weight REAL NOT NULL DEFAULT 0.0,
+                    number_of_parts INTEGER NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+                )
+            """)
     finally:
         conn.close()
 
@@ -523,3 +541,193 @@ def get_packaging_item_by_identifier(identifier: str, db_path: Optional[str] = N
             return item
 
     return None
+
+
+# ==========================================
+# Cart Database Operations
+# ==========================================
+
+def get_cart_items(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Query all items currently in the cart with calculated volume and line weights."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                c.id,
+                c.product_id,
+                c.part_name,
+                c.part_type,
+                c.part_length,
+                c.part_breadth,
+                c.part_height,
+                c.part_weight,
+                c.number_of_parts,
+                p.model_file,
+                p.standard_no_of_parts AS product_snp,
+                c.created_at,
+                c.updated_at
+            FROM cart c
+            LEFT JOIN products p ON c.product_id = p.id OR LOWER(c.part_name) = LOWER(p.part_name)
+            ORDER BY c.id ASC
+        """)
+        rows = cursor.fetchall()
+        items = []
+        for r in rows:
+            d = dict(r)
+            qty = int(d.get("number_of_parts") or 1)
+            wt = float(d.get("part_weight") or 0.0)
+            l = float(d.get("part_length") or 0.0)
+            w = float(d.get("part_breadth") or 0.0)
+            h = float(d.get("part_height") or 0.0)
+            item_vol_cm3 = (l * w * h) / 1000.0
+            item_vol_l = (l * w * h) / 1000000.0
+
+            d["line_weight_kg"] = round(wt * qty, 3)
+            d["unit_volume_liters"] = round(item_vol_l, 4)
+            d["total_volume_liters"] = round(item_vol_l * qty, 4)
+            items.append(d)
+        return items
+    finally:
+        conn.close()
+
+
+def get_cart_item_by_id(item_id: int, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single cart item by ID."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM cart WHERE id = ? LIMIT 1", (item_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def add_or_update_cart_item(item_data: Dict[str, Any], db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Add a product to cart or update its number_of_parts if it already exists."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        product_id = item_data.get("product_id")
+        part_name = item_data.get("part_name")
+
+        # Auto-fill missing specs from products table if product_id or part_name is known
+        product_info = None
+        if product_id is not None:
+            cursor.execute("SELECT * FROM products WHERE id = ? LIMIT 1", (product_id,))
+            row = cursor.fetchone()
+            if row:
+                product_info = dict(row)
+        if not product_info and part_name:
+            cursor.execute("SELECT * FROM products WHERE LOWER(part_name) = LOWER(?) LIMIT 1", (part_name.strip(),))
+            row = cursor.fetchone()
+            if row:
+                product_info = dict(row)
+
+        if product_info:
+            product_id = product_info["id"]
+            part_name = product_info["part_name"]
+            part_type = item_data.get("part_type") or product_info.get("part_type", "Standard")
+            part_length = float(item_data.get("part_length") if item_data.get("part_length") is not None else product_info.get("part_length", 100.0))
+            part_breadth = float(item_data.get("part_breadth") if item_data.get("part_breadth") is not None else product_info.get("part_breadth", 80.0))
+            part_height = float(item_data.get("part_height") if item_data.get("part_height") is not None else product_info.get("part_height", 50.0))
+            part_weight = float(item_data.get("part_weight") if item_data.get("part_weight") is not None else product_info.get("part_weight", 0.0))
+        else:
+            if not part_name or not str(part_name).strip():
+                raise ValueError("part_name is required when product is not found in database")
+            part_name = str(part_name).strip()
+            part_type = str(item_data.get("part_type") or "Standard")
+            part_length = float(item_data.get("part_length") or 100.0)
+            part_breadth = float(item_data.get("part_breadth") or 80.0)
+            part_height = float(item_data.get("part_height") or 50.0)
+            part_weight = float(item_data.get("part_weight") or 0.0)
+
+        requested_qty = max(1, int(item_data.get("number_of_parts") or 1))
+        mode = item_data.get("mode", "increment")  # "increment" or "set"
+
+        # Check if item exists in cart
+        cursor.execute("SELECT id, number_of_parts FROM cart WHERE LOWER(part_name) = LOWER(?) LIMIT 1", (part_name,))
+        existing = cursor.fetchone()
+
+        if existing:
+            item_id = existing["id"]
+            new_qty = (existing["number_of_parts"] + requested_qty) if mode == "increment" else requested_qty
+            cursor.execute("""
+                UPDATE cart
+                SET number_of_parts = ?,
+                    product_id = COALESCE(?, product_id),
+                    part_length = ?,
+                    part_breadth = ?,
+                    part_height = ?,
+                    part_weight = ?,
+                    part_type = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (new_qty, product_id, part_length, part_breadth, part_height, part_weight, part_type, item_id))
+        else:
+            cursor.execute("""
+                INSERT INTO cart (
+                    product_id, part_name, part_type, part_length, part_breadth,
+                    part_height, part_weight, number_of_parts, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (product_id, part_name, part_type, part_length, part_breadth, part_height, part_weight, requested_qty))
+            item_id = cursor.lastrowid
+
+        conn.commit()
+
+        cursor.execute("SELECT * FROM cart WHERE id = ?", (item_id,))
+        saved_row = dict(cursor.fetchone())
+        return saved_row
+    finally:
+        conn.close()
+
+
+def update_cart_item_quantity(item_id: int, number_of_parts: int, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Update the number of parts for an existing cart item. If number_of_parts <= 0, deletes it."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        if number_of_parts <= 0:
+            cursor.execute("DELETE FROM cart WHERE id = ?", (item_id,))
+            conn.commit()
+            return None
+
+        cursor.execute("""
+            UPDATE cart
+            SET number_of_parts = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (int(number_of_parts), item_id))
+        conn.commit()
+
+        cursor.execute("SELECT * FROM cart WHERE id = ?", (item_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def delete_cart_item(item_id: int, db_path: Optional[str] = None) -> bool:
+    """Delete a single cart item by ID."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM cart WHERE id = ?", (item_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def clear_cart(db_path: Optional[str] = None) -> int:
+    """Empty the entire cart table and reset the sequence."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM cart")
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name='cart'")
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()

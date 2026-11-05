@@ -18,6 +18,7 @@ from app.api.custom_box_routes import router as custom_box_router
 from app.api.packing_routes import router as packing_router
 from app.api.product_routes import router as product_router
 from app.api.package_routes import router as package_router
+from app.api.cart_routes import router as cart_router
 
 app = FastAPI(
     title="3D Packing Optimizer API",
@@ -37,6 +38,7 @@ app.add_middleware(
 # Register API routes under /api
 app.include_router(product_router, prefix="/api")
 app.include_router(package_router, prefix="/api")
+app.include_router(cart_router, prefix="/api")
 app.include_router(requirement_router, prefix="/api")
 app.include_router(custom_box_router, prefix="/api")
 app.include_router(packing_router, prefix="/api")
@@ -51,6 +53,7 @@ def root():
         "endpoints": {
             "products": "/api/products",
             "packages": "/api/packages",
+            "cart": "/api/cart",
             "requirements": "/api/requirements",
             "custom_box": "/api/custom-box",
             "packing": "/api/packing",
