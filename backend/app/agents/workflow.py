@@ -9,6 +9,7 @@ Orchestrates the 3 core packaging agents using LangGraph:
 import os
 import re
 import logging
+import math
 import time
 from functools import wraps
 from typing import TypedDict, List, Dict, Any, Optional, Union
@@ -33,6 +34,29 @@ from app.agents.package_recommendation import recommend_package
 from app.db import match_product_from_text, get_sample_products, get_product_by_id, get_product_by_name, get_all_products
 
 logger = logging.getLogger(__name__)
+
+
+def _verified_catalog_product(product: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a catalog row and refuse missing/non-finite physical measurements."""
+    try:
+        length = float(product.get("part_length"))
+        width = float(product.get("part_breadth"))
+        height = float(product.get("part_height"))
+        weight = float(product.get("part_weight"))
+    except (TypeError, ValueError):
+        raise ValueError(f"Catalog product '{product.get('part_name', 'Unknown')}' has incomplete measurements")
+    if any(not math.isfinite(value) or value <= 0 for value in (length, width, height)) or not math.isfinite(weight) or weight < 0:
+        raise ValueError(f"Catalog product '{product.get('part_name', 'Unknown')}' has invalid dimensions or weight")
+    return {
+        "product_id": product["id"],
+        "part_name": product["part_name"],
+        "name": product["part_name"],
+        "part_length": length,
+        "part_width": width,
+        "part_height": height,
+        "part_weight": weight,
+        "part_type": product.get("part_type", "Standard"),
+    }
 
 
 def _timed_workflow_node(stage_name: str, node):
@@ -96,7 +120,9 @@ class UnifiedPackagingWorkflowState(TypedDict, total=False):
     recommended_package: Optional[Dict[str, Any]]
     total_candidates_found: Optional[int]
     narrowing_summary: Optional[str]
+    candidate_filter_summary: Optional[Dict[str, int]]
     tables_queried: Optional[List[str]]
+    database_path: Optional[str]
 
     # Stage 3: Packing Optimizer Agent Output
     fits: Optional[bool]
@@ -210,20 +236,10 @@ def _extract_catalog_manifest(text: str) -> tuple[List[Dict[str, Any]], List[int
                 unknown_ids.append(product_id)
             continue
 
-        product_id = int(product["id"])
-
         quantity = int(quantity_match.group(1)) if quantity_match else int(product.get("standard_no_of_parts") or 1)
-        manifest.append({
-            "product_id": product_id,
-            "part_name": product["part_name"],
-            "name": product["part_name"],
-            "part_length": float(product["part_length"]),
-            "part_width": float(product["part_breadth"]),
-            "part_height": float(product["part_height"]),
-            "part_weight": float(product["part_weight"]),
-            "part_type": product.get("part_type", "Standard"),
-            "quantity": max(1, quantity),
-        })
+        manifest_item = _verified_catalog_product(product)
+        manifest_item["quantity"] = max(1, quantity)
+        manifest.append(manifest_item)
     return manifest, unknown_ids
 
 
@@ -276,7 +292,21 @@ def requirement_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str
     # The single-product catalog matcher returns its first match only. Parse an
     # explicit multi-product request into a verified manifest before that path.
     if isinstance(raw_input, str):
-        manifest, unknown_ids = _extract_catalog_manifest(raw_input)
+        try:
+            manifest, unknown_ids = _extract_catalog_manifest(raw_input)
+        except ValueError as exc:
+            return {
+                "current_stage": "requirement_gathering",
+                "requirement_fulfilled": False,
+                "hitl_required": True,
+                "product_not_found": False,
+                "confirmation_required": False,
+                "status": "catalog_data_invalid",
+                "hitl_reason": str(exc),
+                "summary": str(exc),
+                "requirements": None,
+                "requirement_text": raw_input,
+            }
         if manifest or unknown_ids:
             if unknown_ids:
                 reason = f"Product ID(s) {', '.join(map(str, unknown_ids))} were not found in the catalog."
@@ -354,19 +384,23 @@ def requirement_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str
                         "requirement_text": reason,
                     }
                 quantity = int(supplied_item.get("number_of_parts") or supplied_item.get("quantity") or supplied_item.get("snp") or 1)
-                catalog_items.append({
-                    "product_id": product_row["id"],
-                    "part_name": product_row["part_name"],
-                    "name": product_row["part_name"],
-                    "part_length": float(product_row["part_length"]),
-                    "part_width": float(product_row["part_breadth"]),
-                    "part_height": float(product_row["part_height"]),
-                    "part_weight": float(product_row["part_weight"]),
-                    "part_type": product_row.get("part_type", "Standard"),
-                    "number_of_parts": quantity,
-                    "quantity": quantity,
-                    "snp": quantity,
-                })
+                try:
+                    normalized_product = _verified_catalog_product(product_row)
+                except ValueError as exc:
+                    return {
+                        "current_stage": "requirement_gathering",
+                        "requirement_fulfilled": False,
+                        "hitl_required": True,
+                        "product_not_found": False,
+                        "confirmation_required": False,
+                        "status": "catalog_data_invalid",
+                        "hitl_reason": str(exc),
+                        "summary": str(exc),
+                        "requirements": None,
+                        "requirement_text": str(exc),
+                    }
+                normalized_product.update({"number_of_parts": quantity, "quantity": quantity, "snp": quantity})
+                catalog_items.append(normalized_product)
             req_dict = dict(raw_input)
             req_dict["items"] = catalog_items
             req_dict["catalog_lookup"] = False
@@ -411,17 +445,22 @@ def requirement_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str
 
             if matched_prod:
                 qty = int(raw_input.get("quantity") or raw_input.get("snp") or _requested_quantity(raw_input) or matched_prod.get("standard_no_of_parts") or 1)
-                req_dict = {
-                    "product_id": matched_prod["id"],
-                    "name": matched_prod["part_name"],
-                    "part_name": matched_prod["part_name"],
-                    "part_length": float(matched_prod["part_length"]),
-                    "part_width": float(matched_prod["part_breadth"]),
-                    "part_height": float(matched_prod["part_height"]),
-                    "part_weight": float(matched_prod["part_weight"]),
-                    "part_type": matched_prod.get("part_type", "Standard"),
-                    "snp": qty,
-                }
+                try:
+                    req_dict = _verified_catalog_product(matched_prod)
+                except ValueError as exc:
+                    return {
+                        "current_stage": "requirement_gathering",
+                        "requirement_fulfilled": False,
+                        "hitl_required": True,
+                        "product_not_found": False,
+                        "confirmation_required": False,
+                        "status": "catalog_data_invalid",
+                        "hitl_reason": str(exc),
+                        "summary": str(exc),
+                        "requirements": None,
+                        "requirement_text": str(exc),
+                    }
+                req_dict["snp"] = qty
                 return {
                     "current_stage": "requirement_gathering",
                     "requirement_fulfilled": True,
@@ -616,6 +655,7 @@ def retrieval_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str, 
     recommended_package = retrieval_result.get("recommended_package")
     total_found = retrieval_result.get("total_candidates_found", 0)
     summary = retrieval_result.get("narrowing_summary", "")
+    filter_summary = retrieval_result.get("candidate_filter_summary", {})
     tables_queried = retrieval_result.get("tables_queried", [])
 
     return {
@@ -626,7 +666,9 @@ def retrieval_gathering_node(state: UnifiedPackagingWorkflowState) -> Dict[str, 
         "recommended_package": recommended_package,
         "total_candidates_found": total_found,
         "narrowing_summary": summary,
+        "candidate_filter_summary": filter_summary,
         "tables_queried": tables_queried,
+        "database_path": retrieval_result.get("database_path"),
     }
 
 
@@ -790,12 +832,18 @@ def packing_optimization_node(state: UnifiedPackagingWorkflowState) -> Dict[str,
         partial_id = str(partial.get("candidate_id") or partial.get("package_code") or partial.get("package_id") or partial.get("name") or "")
         closest_candidate = candidate_by_id.get(partial_id)
         retrieval_summary = state.get("narrowing_summary")
-        narrative = (
-            f"Workflow completed with partial fit. Standard warehouse containers cannot fully fit all {snp} {unit_label} "
-            f"of '{part_name}'. No package is recommended. "
-            f"{retrieval_summary or 'No candidate passed the complete 3D fit and weight checks.'}"
-        )
-        status = "workflow_completed_partial_fit"
+        if not candidate_packages:
+            narrative = (
+                f"No database package passed initial screening for {snp} {unit_label} of '{part_name}'. "
+                f"No package was recommended. {retrieval_summary or 'The catalog returned no eligible package candidates.'}"
+            )
+            status = "no_database_candidate"
+        else:
+            narrative = (
+                f"No evaluated package could be verified as a full fit for all {snp} {unit_label} of '{part_name}'. "
+                f"No package is recommended. {packing_result.get('summary') or retrieval_summary or 'Review per-package fit failures.'}"
+            )
+            status = packing_result.get("status") or "workflow_completed_partial_fit"
 
     return {
         "current_stage": "packing_optimization",
@@ -1185,6 +1233,9 @@ def run_unified_workflow(
         "requirements": req_out,
         "metrics": result.get("metrics"),
         "candidate_packages": result.get("candidate_packages", []),
+        "candidate_filter_summary": result.get("candidate_filter_summary", {}),
+        "tables_queried": result.get("tables_queried", []),
+        "database_path": result.get("database_path"),
         "fits": result.get("fits", False),
         "best_container": result.get("best_container"),
         "best_orientation": result.get("best_orientation"),

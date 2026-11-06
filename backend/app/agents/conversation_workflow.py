@@ -2,12 +2,14 @@
 
 import re
 import logging
+import math
 import time
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
 from app.agents.requirement import gather_requirements_turn, generate_conversation_prompt
 from app.services.conversation_store import load_conversation, save_conversation
-from app.db import get_product_by_id, get_product_by_name
+from app.db import get_product_by_id, get_product_by_name, get_all_products
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +55,22 @@ def _reply(
 
 
 def _catalog_item(row: Dict[str, Any], quantity: Optional[int]) -> Dict[str, Any]:
+    dimensions = [row.get("part_length"), row.get("part_breadth"), row.get("part_height")]
+    try:
+        dimensions = [float(value) for value in dimensions]
+        weight = float(row.get("part_weight"))
+    except (TypeError, ValueError):
+        raise ValueError("Catalog product is missing valid dimensions or weight")
+    if any(not math.isfinite(value) or value <= 0 for value in dimensions) or not math.isfinite(weight) or weight < 0:
+        raise ValueError("Catalog product dimensions must be positive and weight cannot be negative")
     return {
         "product_id": row["id"],
         "part_name": row["part_name"],
         "name": row["part_name"],
-        "part_length": float(row["part_length"]),
-        "part_width": float(row["part_breadth"]),
-        "part_height": float(row["part_height"]),
-        "part_weight": float(row["part_weight"]),
+        "part_length": dimensions[0],
+        "part_width": dimensions[1],
+        "part_height": dimensions[2],
+        "part_weight": weight,
         "part_type": row.get("part_type", "Standard"),
         "quantity": max(1, int(quantity or row.get("standard_no_of_parts") or 1)),
     }
@@ -142,6 +152,45 @@ def _unknown_catalog_response(conversation_id: str, state: Dict[str, Any], item:
         "hitl_required": True,
         "hitl_reason": message,
     })
+    name = str(item.get("name") or "").strip()
+    if name and item.get("product_id") is None:
+        normalized = lambda value: re.sub(r"[^a-z0-9]+", "", str(value).lower())
+        target = normalized(name)
+        try:
+            ranked = sorted(
+                (
+                    (SequenceMatcher(None, target, normalized(row.get("part_name", ""))).ratio(), row)
+                    for row in get_all_products()
+                ),
+                key=lambda pair: pair[0],
+                reverse=True,
+            )
+            suggestions = [
+                {"product_id": row["id"], "part_name": row["part_name"], "similarity": round(score, 3)}
+                for score, row in ranked[:3]
+                if score >= 0.45
+            ]
+            if suggestions:
+                response["catalog_suggestions"] = suggestions
+                response["assistant_response"] += " Possible catalog matches: " + "; ".join(
+                    f"{candidate['part_name']} (ID {candidate['product_id']})" for candidate in suggestions
+                ) + ". Please confirm which one you mean."
+                response["summary"] = response["assistant_response"]
+                if state.get("history"):
+                    state["history"][-1]["content"] = response["assistant_response"]
+                    save_conversation(conversation_id, state)
+        except Exception:
+            logger.exception("catalog.suggestion_lookup.failed")
+    return response
+
+
+def _invalid_catalog_data_response(conversation_id: str, state: Dict[str, Any], row: Dict[str, Any]) -> Dict[str, Any]:
+    message = (
+        f"Catalog product '{row.get('part_name', 'Unknown')}' has invalid dimensions or weight. "
+        "Please correct its catalog record before optimizing it."
+    )
+    response = _reply(conversation_id, state, message, status="catalog_data_invalid")
+    response.update({"hitl_required": True, "hitl_reason": message, "product_not_found": False})
     return response
 
 
@@ -184,7 +233,10 @@ def _start_optimization(
             state["manifest"] = catalog_manifest
             state["phase"] = "gathering"
             return _unknown_catalog_response(conversation_id, state, item)
-        catalog_manifest.append(_catalog_item(row, item.get("quantity")))
+        try:
+            catalog_manifest.append(_catalog_item(row, item.get("quantity")))
+        except ValueError:
+            return _invalid_catalog_data_response(conversation_id, state, row)
     state["manifest"] = catalog_manifest
     logger.info("workflow.stage.completed stage=confirmed_product_catalog_revalidation products=%d duration_ms=%.2f", len(catalog_manifest), (time.perf_counter() - catalog_started) * 1000)
 
@@ -217,6 +269,7 @@ def process_chat_turn(
     conversation_id: str,
     user_input: Any,
     *,
+    owner_id: str = "local",
     allow_rotation: bool = True,
     keep_upright: bool = False,
     max_candidate_packages: int = 5,
@@ -224,6 +277,10 @@ def process_chat_turn(
 ) -> Dict[str, Any]:
     """Process one chat turn against its backend-persisted packaging task."""
     state = load_conversation(conversation_id) or _new_state()
+    saved_owner = state.get("owner_id", "local")
+    if saved_owner != owner_id:
+        raise PermissionError("Conversation not found")
+    state["owner_id"] = owner_id
     message = str(user_input if isinstance(user_input, str) else (
         user_input.get("text") or user_input.get("user_input") or user_input.get("part_name") or ""
     )).strip()
@@ -321,7 +378,10 @@ def process_chat_turn(
             unknown_reference = item
             continue
         if product_row:
-            catalog_item = _catalog_item(product_row, item.get("quantity"))
+            try:
+                catalog_item = _catalog_item(product_row, item.get("quantity"))
+            except ValueError:
+                return _invalid_catalog_data_response(conversation_id, state, product_row)
             existing = next((p for p in pending_products if p.get("product_id") == catalog_item["product_id"]), None)
             if existing:
                 existing["quantity"] += catalog_item["quantity"]

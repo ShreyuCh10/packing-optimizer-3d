@@ -28,6 +28,8 @@ A fully deterministic system that takes part/packaging requirements
 """
 
 import csv
+import logging
+import math
 import os
 import re
 import sqlite3
@@ -35,6 +37,10 @@ from typing import TypedDict, List, Dict, Any, Optional, Union, Tuple
 
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
+from app.db import DB_PATH, get_db_connection as get_shared_db_connection
+
+logger = logging.getLogger(__name__)
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Try importing domain helpers from services.custom_box, with resilient fallbacks
 try:
@@ -67,22 +73,9 @@ except ImportError:
             "alternative_layouts_count": 1,
         }
 
-# Database path resolution
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_DB_PATH = os.path.join(BACKEND_DIR, "data", "products.db")
-DB_PATH = os.environ.get("SQLITE_DB_PATH", DEFAULT_DB_PATH)
-
-
 def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
-    """Create a SQLite database connection with Row factory."""
-    path = db_path or DB_PATH
-    if not os.path.isabs(path) and not os.path.exists(path):
-        candidate = os.path.join(BACKEND_DIR, path)
-        if os.path.exists(candidate):
-            path = candidate
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Use the application's single canonical SQLite path and connection setup."""
+    return get_shared_db_connection(db_path or DB_PATH)
 
 
 # ==========================================
@@ -131,6 +124,8 @@ class RetrievalGatheringState(TypedDict, total=False):
     narrowed_count: int
     narrowing_summary: str
     tables_queried: List[str]
+    database_path: str
+    candidate_filter_summary: Dict[str, int]
     packages_table_exists: bool
     status: str
     message: Optional[str]
@@ -151,6 +146,13 @@ def parse_snp(raw_snp: Any) -> int:
     return 1
 
 
+def _first_defined(data: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if data.get(key) is not None:
+            return data[key]
+    return None
+
+
 def resolve_requirements_from_db(
     data: Dict[str, Any],
     db_path: Optional[str] = None,
@@ -166,6 +168,7 @@ def resolve_requirements_from_db(
 
     db_row: Optional[Dict[str, Any]] = None
 
+    conn = None
     try:
         conn = get_db_connection(db_path)
         with conn:
@@ -184,20 +187,23 @@ def resolve_requirements_from_db(
                 r = cursor.fetchone()
                 if r:
                     db_row = dict(r)
-        conn.close()
     except Exception:
-        pass
+        logger.exception("retrieval.product_lookup.failed product_id=%s part_name=%s", product_id, part_name)
+        raise
+    finally:
+        if conn is not None:
+            conn.close()
 
     if db_row:
         # Auto-populate missing values from the database record
         if resolved.get("part_length") is None:
-            resolved["part_length"] = float(db_row.get("part_length", 100.0))
+            resolved["part_length"] = db_row.get("part_length")
         if resolved.get("part_width") is None:
-            resolved["part_width"] = float(db_row.get("part_breadth", 80.0))
+            resolved["part_width"] = db_row.get("part_breadth")
         if resolved.get("part_height") is None:
-            resolved["part_height"] = float(db_row.get("part_height", 50.0))
+            resolved["part_height"] = db_row.get("part_height")
         if resolved.get("part_weight") is None:
-            resolved["part_weight"] = float(db_row.get("part_weight", 1.0))
+            resolved["part_weight"] = db_row.get("part_weight")
         if not resolved.get("part_type"):
             resolved["part_type"] = str(db_row.get("part_type", "Standard"))
         if resolved.get("snp") is None:
@@ -227,18 +233,25 @@ def calculate_metrics(
     # Check for multi-item cart manifest
     if data.get("items") and isinstance(data["items"], list) and len(data["items"]) > 0:
         total_vol = 0.0
+        total_padded_vol = 0.0
         total_wt = 0.0
         max_l, max_w, max_h = 0.0, 0.0, 0.0
         total_qty = 0
         resolved_items = []
         for it in data["items"]:
             rit = resolve_requirements_from_db(it, db_path=db_path)
-            l = float(rit.get("part_length") or rit.get("length") or 100.0)
-            w = float(rit.get("part_width") or rit.get("part_breadth") or rit.get("width") or 80.0)
-            h = float(rit.get("part_height") or rit.get("height") or 50.0)
-            wt = float(rit.get("part_weight") or rit.get("weight") or 1.0)
+            try:
+                l = float(_first_defined(rit, "part_length", "length"))
+                w = float(_first_defined(rit, "part_width", "part_breadth", "width"))
+                h = float(_first_defined(rit, "part_height", "height"))
+                wt = float(_first_defined(rit, "part_weight", "weight"))
+            except (TypeError, ValueError):
+                raise ValueError(f"Product '{rit.get('name') or rit.get('part_name') or 'Item'}' is missing valid dimensions or weight")
+            if any(not math.isfinite(value) for value in (l, w, h, wt)) or min(l, w, h) <= 0 or wt < 0:
+                raise ValueError(f"Product '{rit.get('name') or rit.get('part_name') or 'Item'}' dimensions must be positive and weight cannot be negative")
             qty = max(1, int(rit.get("quantity") or rit.get("number_of_parts") or rit.get("snp") or 1))
             total_vol += (l * w * h / 1000000.0) * qty
+            total_padded_vol += ((l + 30.0) * (w + 30.0) * (h + 30.0) / 1000000.0) * qty
             total_wt += wt * qty
             max_l = max(max_l, l)
             max_w = max(max_w, w)
@@ -257,7 +270,9 @@ def calculate_metrics(
         eff_l = round(max_l + (2 * padding_thickness), 2)
         eff_w = round(max_w + (2 * padding_thickness), 2)
         eff_h = round(max_h + (2 * padding_thickness), 2)
-        vol_req = round(max(total_vol * 1.25, (eff_l * eff_w * eff_h) / 1000000.0), 4)
+        # This is a lower bound for screening, not a claimed arrangement. The
+        # 3D solver later checks every individual unit and can reject candidates.
+        vol_req = round(max(total_padded_vol, (eff_l * eff_w * eff_h) / 1000000.0), 4)
 
         return {
             "part_name": data.get("name") or data.get("part_name") or f"Cart Manifest ({total_qty} units)",
@@ -269,6 +284,7 @@ def calculate_metrics(
             "single_product_volume_cm3": round(max_l * max_w * max_h / 1000.0, 3),
             "single_product_volume_liters": round(max_l * max_w * max_h / 1000000.0, 4),
             "total_product_volume_liters": round(total_vol, 4),
+            "total_padded_product_volume_liters": round(total_padded_vol, 4),
             "total_product_weight_kg": round(total_wt, 3),
             "fragility": fragility,
             "recommended_padding_material": padding_material,
@@ -281,10 +297,15 @@ def calculate_metrics(
         }
 
     # Extract dimensions with fallbacks
-    length = float(data.get("part_length") or data.get("length") or 100.0)
-    width = float(data.get("part_width") or data.get("part_breadth") or data.get("width") or 80.0)
-    height = float(data.get("part_height") or data.get("parth_height") or data.get("height") or 50.0)
-    weight = float(data.get("part_weight") or data.get("weight") or 1.0)
+    try:
+        length = float(_first_defined(data, "part_length", "length"))
+        width = float(_first_defined(data, "part_width", "part_breadth", "width"))
+        height = float(_first_defined(data, "part_height", "parth_height", "height"))
+        weight = float(_first_defined(data, "part_weight", "weight"))
+    except (TypeError, ValueError):
+        raise ValueError("Product requirements need dimensions in mm and weight in kg")
+    if any(not math.isfinite(value) for value in (length, width, height, weight)) or min(length, width, height) <= 0 or weight < 0:
+        raise ValueError("Product dimensions must be positive and weight cannot be negative")
     part_type = str(data.get("part_type") or data.get("material") or "standard")
     snp = parse_snp(data.get("snp", 1))
 
@@ -404,14 +425,14 @@ def fetch_all_candidates_from_db(
                         "name": str(row.get("package")),
                         "category": "carton",
                         "category_label": "Carton Box",
-                        "inner_length_mm": float(row.get("inner_length_mm") or row.get("outer_length_mm") or 300.0),
-                        "inner_width_mm": float(row.get("inner_width_mm") or row.get("outer_width_mm") or 200.0),
-                        "inner_height_mm": float(row.get("inner_height_mm") or row.get("outer_height_mm") or 100.0),
-                        "outer_length_mm": float(row.get("outer_length_mm") or 300.0),
-                        "outer_width_mm": float(row.get("outer_width_mm") or 200.0),
-                        "outer_height_mm": float(row.get("outer_height_mm") or 100.0),
-                        "max_weight_capacity_kg": float(row.get("part_weight_kg") or row.get("total_weight_kg") or 9.0),
-                        "empty_weight_kg": float(row.get("empty_weight_kg") or 1.0),
+                        "inner_length_mm": row.get("inner_length_mm"),
+                        "inner_width_mm": row.get("inner_width_mm"),
+                        "inner_height_mm": row.get("inner_height_mm"),
+                        "outer_length_mm": row.get("outer_length_mm"),
+                        "outer_width_mm": row.get("outer_width_mm"),
+                        "outer_height_mm": row.get("outer_height_mm"),
+                        "max_weight_capacity_kg": row.get("part_weight_kg"),
+                        "empty_weight_kg": row.get("empty_weight_kg"),
                         "inventory": int(row["inventory"]) if row.get("inventory") is not None else None,
                         "pallet_info": {
                             "pallet_length_mm": row.get("pallet_length_mm"),
@@ -596,27 +617,65 @@ def narrow_down_packages(
     vol_required = metrics["total_volume_required_liters"]
 
     all_fitting: List[Dict[str, Any]] = []
+    filter_counts = {
+        "candidate_count": len(candidates),
+        "out_of_stock": 0,
+        "invalid_dimensions": 0,
+        "dimension_mismatch": 0,
+        "insufficient_volume": 0,
+        "missing_capacity": 0,
+        "insufficient_capacity": 0,
+    }
 
     for pkg in candidates:
         inventory_value = pkg.get("inventory")
-        inventory = int(inventory_value) if inventory_value is not None else None
+        try:
+            inventory = int(inventory_value) if inventory_value is not None else None
+        except (TypeError, ValueError):
+            inventory = None
         if inventory is not None and inventory <= 0:
+            filter_counts["out_of_stock"] += 1
             continue
 
-        box_l = float(pkg["inner_length_mm"])
-        box_w = float(pkg["inner_width_mm"])
-        box_h = float(pkg["inner_height_mm"])
+        try:
+            box_l = float(pkg["inner_length_mm"])
+            box_w = float(pkg["inner_width_mm"])
+            box_h = float(pkg["inner_height_mm"])
+        except (TypeError, ValueError, KeyError):
+            filter_counts["invalid_dimensions"] += 1
+            continue
+        if any(not math.isfinite(value) for value in (box_l, box_w, box_h)) or min(box_l, box_w, box_h) <= 0:
+            filter_counts["invalid_dimensions"] += 1
+            continue
         max_weight_value = pkg.get("max_weight_capacity_kg")
-        max_wt = float(max_weight_value) if max_weight_value is not None else None
+        try:
+            max_wt = float(max_weight_value) if max_weight_value is not None else None
+        except (TypeError, ValueError):
+            max_wt = None
+        if max_wt is not None and (not math.isfinite(max_wt) or max_wt < 0):
+            max_wt = None
 
         # Check 3D geometric orthogonal fit
         fits_3d = check_3d_fits([req_l, req_w, req_h], [box_l, box_w, box_h])
+        if not fits_3d:
+            filter_counts["dimension_mismatch"] += 1
+        box_volume_liters = (box_l * box_w * box_h) / 1000000.0
+        # Total occupied volume is a hard necessary condition for any layout.
+        # Keep dimensional screening as a per-item lower bound; exact placement
+        # is deliberately deferred to the 3D solver.
+        fits_volume = float(metrics.get("total_product_volume_liters", 0.0)) <= box_volume_liters
+        if not fits_volume:
+            filter_counts["insufficient_volume"] += 1
 
         # Check weight capacity
         fits_weight = max_wt is not None and max_wt >= max_rating
+        if max_wt is None:
+            filter_counts["missing_capacity"] += 1
+        elif not fits_weight:
+            filter_counts["insufficient_capacity"] += 1
 
-        if fits_3d and fits_weight:
-            box_volume_liters = round((box_l * box_w * box_h) / 1000000.0, 3)
+        if fits_3d and fits_volume and fits_weight:
+            box_volume_liters = round(box_volume_liters, 3)
             item_volume_liters = float(metrics.get("total_product_volume_liters", 0.0))
             utilization_pct = round(
                 (item_volume_liters / max(0.001, box_volume_liters)) * 100.0,
@@ -670,7 +729,7 @@ def narrow_down_packages(
 
     # Separate into cartons vs heavy-duty stillages/pallets
     cartons = [p for p in all_fitting if p["category"] == "carton"]
-    heavy_duty = [p for p in all_fitting if p["category"] in ("metal_stillage", "metal_pallet", "base_pallets")]
+    heavy_duty = [p for p in all_fitting if p["category"] in ("metal_stillage", "metal_pallet", "base_pallet", "base_pallets")]
 
     narrowed: List[Dict[str, Any]] = []
     summary_text = ""
@@ -728,10 +787,15 @@ def narrow_down_packages(
         )
 
     else:
+        failed_reasons = [
+            f"{count} {reason.replace('_', ' ')}"
+            for reason, count in filter_counts.items()
+            if reason != "candidate_count" and count
+        ]
         summary_text = (
-            f"No package with a verified payload rating can accommodate the required dimensions "
-            f"({req_l}x{req_w}x{req_h} mm) and payload ({max_rating} kg). Add rated heavy-duty packaging "
-            "data before making a recommendation."
+            f"No database package passed candidate screening for {req_l}x{req_w}x{req_h} mm and "
+            f"{max_rating} kg payload. Filter counts: {', '.join(failed_reasons) or 'no candidates found'}. "
+            "Any package must have verified dimensions, payload capacity, and stock."
         )
 
     best_match = narrowed[0] if narrowed else None
@@ -743,6 +807,7 @@ def narrow_down_packages(
         "total_fitting_in_db": len(all_fitting),
         "narrowed_count": len(narrowed),
         "narrowing_summary": summary_text,
+        "candidate_filter_summary": filter_counts,
     }
 
 
@@ -762,7 +827,7 @@ def query_candidate_packages(
     )
 
     return {
-        "packages_table_exists": len(tables_queried) > 0,
+        "packages_table_exists": "packages" in tables_queried,
         "database_path": os.path.abspath(target_db),
         "tables_queried": tables_queried,
         "matching_packages": narrowed_result["matching_packages"],
@@ -771,6 +836,7 @@ def query_candidate_packages(
         "total_fitting_in_db": narrowed_result["total_fitting_in_db"],
         "narrowed_count": narrowed_result["narrowed_count"],
         "narrowing_summary": narrowed_result["narrowing_summary"],
+        "candidate_filter_summary": narrowed_result["candidate_filter_summary"],
     }
 
 
@@ -802,7 +868,9 @@ def query_packages_node(state: RetrievalGatheringState) -> Dict[str, Any]:
         "total_candidates_found": query_result["total_fitting_in_db"],
         "narrowed_count": query_result["narrowed_count"],
         "narrowing_summary": query_result["narrowing_summary"],
+        "candidate_filter_summary": query_result["candidate_filter_summary"],
         "tables_queried": query_result["tables_queried"],
+        "database_path": query_result["database_path"],
         "packages_table_exists": table_exists,
         "status": status,
         "message": message,
@@ -851,8 +919,10 @@ def run_retrieval_gathering(
         "narrowed_count": query_result["narrowed_count"],
         "narrowing_summary": query_result["narrowing_summary"],
         "tables_queried": query_result["tables_queried"],
+        "database_path": query_result["database_path"],
         "packages_table_exists": query_result["packages_table_exists"],
         "status": status,
+        "candidate_filter_summary": query_result["candidate_filter_summary"],
     }
 
 

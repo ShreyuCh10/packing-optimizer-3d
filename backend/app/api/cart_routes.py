@@ -180,10 +180,7 @@ def optimize_cart_packing(
     allow_rotation: bool = Query(default=True, description="Allow 3D orthogonal rotations"),
     keep_upright: bool = Query(default=False, description="Restrict rotation to yaw only"),
 ):
-    """Take all items in the active cart, build a multi-item manifest,
-    and run the 3D Extreme Point Packing Optimizer across candidate containers.
-    """
-    from app.agents.packing_optimizer import run_packing_optimizer
+    """Run the cart through the catalog validation and workflow used by chatbot optimization."""
     items = get_cart_items()
     if not items:
         raise HTTPException(status_code=400, detail="Cart is empty. Add products to the cart before optimizing.")
@@ -192,6 +189,7 @@ def optimize_cart_packing(
     for it in items:
         manifest_items.append({
             "id": f"cart_{it['id']}_{it['part_name'].replace(' ', '_').lower()}",
+            "product_id": it.get("product_id"),
             "name": it["part_name"],
             "length": float(it["part_length"]),
             "width": float(it["part_breadth"]),
@@ -203,12 +201,12 @@ def optimize_cart_packing(
         })
 
     try:
-        packing_result = run_packing_optimizer({
+        from app.agents.workflow import run_unified_workflow
+        return run_unified_workflow({
             "items": manifest_items,
             "allow_rotation": allow_rotation,
             "keep_upright": keep_upright,
         })
-        return packing_result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cart packing optimization failed: {str(e)}")
 

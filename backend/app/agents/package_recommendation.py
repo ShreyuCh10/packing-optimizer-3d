@@ -1,10 +1,14 @@
 import json
+import logging
 import os
+import time
 from typing import Any, Dict, List, Literal
 
 from dotenv import find_dotenv, load_dotenv
 from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 for env_file in [
@@ -102,7 +106,7 @@ def _deterministic_recommendation(
         ),
     )
     recommendation = _grounded_explanation(selected, candidates, status)
-    if status != "single_feasible_candidate":
+    if status == "model_not_configured":
         recommendation["assistant_response"] += " The model is not configured."
         recommendation["reasoning"] = recommendation["assistant_response"]
     return recommendation
@@ -186,12 +190,16 @@ def recommend_package(candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
         ),
     ]
 
+    started = time.perf_counter()
+    logger.info("llm.call.started operation=package_recommendation model=%s", model_name)
     try:
         response: PackageRecommendation = model.invoke(prompt)
+        logger.info("llm.call.completed operation=package_recommendation duration_ms=%.2f", (time.perf_counter() - started) * 1000)
     except Exception as exc:
+        logger.exception("llm.call.failed operation=package_recommendation duration_ms=%.2f", (time.perf_counter() - started) * 1000)
         fallback = _deterministic_recommendation(candidates, "model_call_failed")
-        fallback["reasoning"] += f" (Live model unavailable: {exc})"
-        fallback["error"] = str(exc)
+        fallback["reasoning"] += " A deterministic fallback was used because the recommendation model call failed."
+        fallback["error"] = "model_call_failed"
         return fallback
 
     selected_id = str(response.candidate_id)

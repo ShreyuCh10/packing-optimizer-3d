@@ -142,6 +142,8 @@ def migrate_packages(conn: sqlite3.Connection, csv_path: str, clean: bool = Fals
             inner_h = float(row["inner_height_mm"])
             part_wt = float(row["part_weight_kg"])
             inventory = int(row["inventory"]) if row.get("inventory") else None
+            optional_float = lambda key: float(row[key]) if row.get(key, "").strip() else None
+            optional_int = lambda key: int(row[key]) if row.get(key, "").strip() else None
 
             conn.execute(sql, (
                 row["package"].strip(),
@@ -154,15 +156,15 @@ def migrate_packages(conn: sqlite3.Connection, csv_path: str, clean: bool = Fals
                 float(row["empty_weight_kg"]),
                 part_wt,
                 float(row["total_weight_kg"]),
-                float(row.get("pallet_length_mm", 1200.0)),
-                float(row.get("pallet_width_mm", 1000.0)),
-                float(row.get("pallet_height_mm", 150.0)),
-                int(row.get("bins_per_row", 1)),
-                int(row.get("bins_per_column", 1)),
-                int(row.get("layers_per_pallet", 1)),
-                int(row.get("bins_per_pallet", 1)),
-                float(row.get("stack_height_mm", 1000.0)),
-                float(row.get("pallet_load_weight_kg", 500.0)),
+                optional_float("pallet_length_mm"),
+                optional_float("pallet_width_mm"),
+                optional_float("pallet_height_mm"),
+                optional_int("bins_per_row"),
+                optional_int("bins_per_column"),
+                optional_int("layers_per_pallet"),
+                optional_int("bins_per_pallet"),
+                optional_float("stack_height_mm"),
+                optional_float("pallet_load_weight_kg"),
                 inventory,
             ))
             count += 1

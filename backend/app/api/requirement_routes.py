@@ -5,7 +5,7 @@ import logging
 import queue
 import threading
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
@@ -80,6 +80,8 @@ def extract_structured_requirements(input_data: RequirementInput):
                 raise HTTPException(status_code=422, detail="Failed to extract requirements from text")
             return req_obj
         return res
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
@@ -120,17 +122,20 @@ def retrieve_packages(input_data: RetrievalInput):
         data = input_data.model_dump()
         max_res = int(data.pop("max_results", 5) or 5)
         return run_retrieval_gathering(data, max_results=max_res)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Retrieval agent failed: {str(e)}")
 
 
-def _run_chat_turn(input_data: Dict[str, Any], on_stage=None) -> Dict[str, Any]:
+def _run_chat_turn(input_data: Dict[str, Any], on_stage=None, owner_id: str = "local") -> Dict[str, Any]:
     from app.agents.conversation_workflow import process_chat_turn
     user_in = input_data.get("user_input", input_data)
     conversation_id = str(input_data.get("conversation_id") or uuid4())
     return process_chat_turn(
         conversation_id=conversation_id,
         user_input=user_in,
+        owner_id=owner_id,
         allow_rotation=input_data.get("allow_rotation", True),
         keep_upright=input_data.get("keep_upright", False),
         max_candidate_packages=input_data.get("max_candidate_packages", 5),
@@ -139,14 +144,18 @@ def _run_chat_turn(input_data: Dict[str, Any], on_stage=None) -> Dict[str, Any]:
 
 
 @router.post("/workflow/stream", summary="Run stateful packaging workflow with live stage updates")
-def run_workflow_stream_endpoint(input_data: Dict[str, Any]):
+def run_workflow_stream_endpoint(input_data: Dict[str, Any], request: Request = None):
     """Stream actual backend stage changes followed by the completed workflow result."""
     events: queue.Queue = queue.Queue()
 
     def execute():
         started = time.perf_counter()
         try:
-            result = _run_chat_turn(input_data, on_stage=lambda label: events.put({"type": "progress", "label": label}))
+            result = _run_chat_turn(
+                input_data,
+                on_stage=lambda label: events.put({"type": "progress", "label": label}),
+                owner_id=getattr(getattr(request, "state", None), "authenticated_user_id", "local"),
+            )
             events.put({"type": "result", "result": result})
             logger.info("api.workflow.completed conversation_id=%s duration_ms=%.2f", result.get("conversation_id"), (time.perf_counter() - started) * 1000)
         except Exception as exc:
@@ -213,13 +222,18 @@ def execute_workflow_endpoint(input_data: Dict[str, Any]):
 
 
 @router.post("/workflow", summary="Run End-to-End 3-Agent Packaging Workflow")
-def run_workflow_endpoint(input_data: Dict[str, Any]):
+def run_workflow_endpoint(input_data: Dict[str, Any], request: Request = None):
     """Process a stateful chat turn, then optimize after the user finishes adding requirements."""
     started = time.perf_counter()
     try:
-        result = _run_chat_turn(input_data)
+        result = _run_chat_turn(
+            input_data,
+            owner_id=getattr(getattr(request, "state", None), "authenticated_user_id", "local"),
+        )
         logger.info("api.workflow.completed conversation_id=%s duration_ms=%.2f", result.get("conversation_id"), (time.perf_counter() - started) * 1000)
         return result
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     except Exception as e:
         logger.exception("api.workflow.failed duration_ms=%.2f", (time.perf_counter() - started) * 1000)
         raise HTTPException(status_code=500, detail=f"Unified workflow failed: {str(e)}")

@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -17,18 +18,47 @@ else:
     DB_PATH = os.path.abspath(os.path.join(path_root, normalized_db_path))
 
 
-def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
+def get_db_connection(db_path: Optional[str] = None, *, create: bool = False) -> sqlite3.Connection:
     """Create and return a SQLite database connection with row factory enabled."""
-    target_path = db_path or DB_PATH
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    target_path = os.path.abspath(db_path or DB_PATH)
+    if not os.path.exists(target_path):
+        if not create:
+            raise FileNotFoundError(f"Configured SQLite database does not exist: {target_path}")
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
     conn = sqlite3.connect(target_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+def get_database_status() -> Dict[str, Any]:
+    """Inspect the configured database read-only so health checks never create an empty DB."""
+    target_path = os.path.abspath(DB_PATH)
+    if not os.path.isfile(target_path):
+        return {"path": target_path, "exists": False, "required_tables": {"products": False, "packages": False}}
+    uri = f"{Path(target_path).as_uri()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        required = {"products": "products" in tables, "packages": "packages" in tables}
+        return {
+            "path": target_path,
+            "exists": True,
+            "required_tables": required,
+            "optional_packaging_tables": {
+                name: name in tables for name in ("base_pallets", "metal_pallets", "metal_stillages")
+            },
+            "healthy": all(required.values()),
+        }
+    finally:
+        conn.close()
+
+
 def init_db(db_path: Optional[str] = None) -> None:
     """Initialize database tables and views for products, packages, pallets, stillages, and trucks."""
-    conn = get_db_connection(db_path)
+    conn = get_db_connection(db_path, create=True)
     try:
         with conn:
             # 1. Primary 'products' table

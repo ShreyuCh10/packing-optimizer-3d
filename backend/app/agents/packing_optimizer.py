@@ -26,6 +26,7 @@ LLM agentic reasoning or conversational explanations can be layered on seamlessl
 import os
 import re
 import sqlite3
+import logging
 from typing import TypedDict, List, Dict, Any, Optional, Union, Tuple
 
 from langgraph.graph import StateGraph, START, END
@@ -34,6 +35,8 @@ from pydantic import BaseModel, Field
 # Database & Domain Helpers
 from app.services.packing.orientations import get_possible_orientations
 from app.services.render.viewer import generate_scene_data
+
+logger = logging.getLogger(__name__)
 
 try:
     from app.agents.retrieval_gathering import run_retrieval_gathering
@@ -72,7 +75,7 @@ class ContainerSpec(BaseModel):
     length: float = Field(..., gt=0, description="Internal length in mm")
     width: float = Field(..., gt=0, description="Internal width in mm")
     height: float = Field(..., gt=0, description="Internal height in mm")
-    max_weight_capacity_kg: Optional[float] = Field(default=1000.0, description="Max weight capacity in kg")
+    max_weight_capacity_kg: Optional[float] = Field(default=None, description="Verified max weight capacity in kg")
     inventory: Optional[int] = Field(default=None, description="Available stock count, if provided")
 
 
@@ -335,7 +338,10 @@ def pack_single_container_extreme_points(
     c_l = float(container.get("inner_length_mm") or container.get("length", 300.0))
     c_w = float(container.get("inner_width_mm") or container.get("width", 200.0))
     c_h = float(container.get("inner_height_mm") or container.get("height", 100.0))
-    max_wt = float(container.get("max_weight_capacity_kg") or container.get("max_weight_kg", 1000.0))
+    raw_max_wt = container.get("max_weight_capacity_kg")
+    if raw_max_wt is None:
+        raw_max_wt = container.get("max_weight_kg")
+    max_wt = float(raw_max_wt) if raw_max_wt is not None else None
     c_name = str(container.get("name", "Container"))
 
     placed: List[PlacedBox] = []
@@ -422,7 +428,14 @@ def pack_single_container_extreme_points(
         bounding_box_vol = 0.0
         bounding_box_util = 0.0
 
-    all_fit = len(unplaced) == 0 and total_packed_weight <= max_wt
+    all_fit = len(unplaced) == 0 and max_wt is not None and total_packed_weight <= max_wt
+    fit_failure_reasons = []
+    if unplaced:
+        fit_failure_reasons.append("one_or_more_items_could_not_be_placed")
+    if max_wt is None:
+        fit_failure_reasons.append("verified_weight_capacity_missing")
+    elif total_packed_weight > max_wt:
+        fit_failure_reasons.append("total_item_weight_exceeds_capacity")
 
     # Compile orientation breakdown for all placed items
     orientations_breakdown = [
@@ -467,7 +480,8 @@ def pack_single_container_extreme_points(
         },
         "max_weight_capacity_kg": max_wt,
         "total_packed_weight_kg": round(total_packed_weight, 3),
-        "weight_within_limit": total_packed_weight <= max_wt,
+        "weight_within_limit": max_wt is not None and total_packed_weight <= max_wt,
+        "fit_failure_reasons": fit_failure_reasons,
         "fits": all_fit,
         "placed_count": len(placed),
         "unplaced_count": len(unplaced),
@@ -623,7 +637,7 @@ def resolve_candidate_containers(
 ) -> List[Dict[str, Any]]:
     """Resolve candidate containers from input or auto-retrieve top narrowed packages."""
     # 1. Explicit candidate containers list
-    if data.get("candidate_containers") and isinstance(data["candidate_containers"], list):
+    if "candidate_containers" in data and isinstance(data["candidate_containers"], list):
         return [
             {
                 "name": c.get("name") or c.get("package") or f"Box_{i + 1}",
@@ -633,7 +647,7 @@ def resolve_candidate_containers(
                 "inner_length_mm": float(c.get("inner_length_mm") or c.get("length", 300.0)),
                 "inner_width_mm": float(c.get("inner_width_mm") or c.get("width", 200.0)),
                 "inner_height_mm": float(c.get("inner_height_mm") or c.get("height", 100.0)),
-                "max_weight_capacity_kg": float(c.get("max_weight_capacity_kg") or c.get("max_weight_kg", 1000.0)),
+                "max_weight_capacity_kg": c.get("max_weight_capacity_kg") if c.get("max_weight_capacity_kg") is not None else c.get("max_weight_kg"),
                 "material": c.get("material"),
                 "inventory": c.get("inventory"),
             }
@@ -651,7 +665,7 @@ def resolve_candidate_containers(
             "inner_length_mm": float(c.get("inner_length_mm") or c.get("length", 300.0)),
             "inner_width_mm": float(c.get("inner_width_mm") or c.get("width", 200.0)),
             "inner_height_mm": float(c.get("inner_height_mm") or c.get("height", 100.0)),
-            "max_weight_capacity_kg": float(c.get("max_weight_capacity_kg") or c.get("max_weight_kg", 1000.0)),
+            "max_weight_capacity_kg": c.get("max_weight_capacity_kg") if c.get("max_weight_capacity_kg") is not None else c.get("max_weight_kg"),
             "material": c.get("material"),
             "inventory": c.get("inventory"),
         }]
@@ -659,16 +673,19 @@ def resolve_candidate_containers(
     # 3. Auto-fetch top narrowed packages from retrieval_gathering / SQLite database
     if data.get("auto_fetch_db_packages", True) and run_retrieval_gathering:
         try:
-            total_wt = sum(float(it.get("weight", 0)) for it in items)
-            # Use representative first item
-            sample = items[0] if items else {"length": 100.0, "width": 80.0, "height": 50.0, "weight": 1.0}
             retrieval_req = {
-                "name": sample.get("name", "Part"),
-                "part_length": sample.get("length"),
-                "part_width": sample.get("width"),
-                "part_height": sample.get("height"),
-                "part_weight": total_wt / max(1, len(items)),
-                "snp": len(items),
+                "items": [
+                    {
+                        "name": item.get("name", "Item"),
+                        "part_length": item.get("length"),
+                        "part_width": item.get("width"),
+                        "part_height": item.get("height"),
+                        "part_weight": item.get("weight"),
+                        "quantity": 1,
+                        "catalog_lookup": False,
+                    }
+                    for item in items
+                ]
             }
             ret_res = run_retrieval_gathering(retrieval_req, max_results=5)
             narrowed_pkgs = ret_res.get("matching_packages", [])
@@ -685,22 +702,15 @@ def resolve_candidate_containers(
                         "inner_length_mm": float(inner_dims.get("length", 300.0)),
                         "inner_width_mm": float(inner_dims.get("width", 200.0)),
                         "inner_height_mm": float(inner_dims.get("height", 100.0)),
-                        "max_weight_capacity_kg": float(p.get("max_weight_capacity_kg", 9.0)),
+                        "max_weight_capacity_kg": p.get("max_weight_capacity_kg"),
                         "material": p.get("material"),
                         "inventory": p.get("inventory"),
                     })
                 return candidates
         except Exception:
-            pass
+            logger.exception("packing.candidate_retrieval.failed; returning no package candidates")
 
-    # 4. Standard default shipping cartons fallback
-    return [
-        {"name": "Package 1", "category": "carton", "inner_length_mm": 288.0, "inner_width_mm": 188.0, "inner_height_mm": 92.0, "max_weight_capacity_kg": 4.6},
-        {"name": "Package 3", "category": "carton", "inner_length_mm": 303.0, "inner_width_mm": 198.0, "inner_height_mm": 102.0, "max_weight_capacity_kg": 5.2},
-        {"name": "Package 9", "category": "carton", "inner_length_mm": 346.0, "inner_width_mm": 226.0, "inner_height_mm": 131.0, "max_weight_capacity_kg": 5.4},
-        {"name": "Package 16", "category": "carton", "inner_length_mm": 394.0, "inner_width_mm": 259.0, "inner_height_mm": 165.0, "max_weight_capacity_kg": 6.4},
-        {"name": "Package 25", "category": "carton", "inner_length_mm": 454.0, "inner_width_mm": 298.0, "inner_height_mm": 204.0, "max_weight_capacity_kg": 7.3},
-    ]
+    return []
 
 
 # ==========================================
@@ -774,10 +784,23 @@ def evaluate_and_rank_node(state: PackingOptimizerState) -> Dict[str, Any]:
         best = evaluations[0]
         fits_all = False
         status = "partial_fit_only"
+        reason_text = []
+        if best.get("unplaced_count", 0):
+            reason_text.append(
+                f"{best['placed_count']}/{best['total_items']} items placed, {best['unplaced_count']} could not be placed"
+            )
+        if best.get("max_weight_capacity_kg") is None:
+            status = "capacity_unverified"
+            reason_text.append("the package has no verified payload rating")
+        elif not best.get("weight_within_limit", False):
+            status = "capacity_exceeded"
+            reason_text.append(
+                f"total item weight {best.get('total_packed_weight_kg')} kg exceeds the "
+                f"{best.get('max_weight_capacity_kg')} kg package rating"
+            )
         summary = (
-            f"Items do not fully fit into the evaluated containers. {best['container_name']} placed "
-            f"{best['placed_count']}/{best['total_items']} items ({best['unplaced_count']} unplaced). "
-            f"A larger container or custom box is recommended."
+            f"{best['container_name']} is not a verified full fit: "
+            f"{'; '.join(reason_text) or 'the solver could not verify a complete fit'}."
         )
 
     best_orientation = best.get("best_orientation")

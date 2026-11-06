@@ -3,6 +3,7 @@ import logging
 import time
 from typing import TypedDict, Literal, Optional, Dict, Any, Union, Tuple, List
 import re
+import math
 
 from laya.integrations.langchain import LayaRouter
 from langgraph.graph import START, END, StateGraph
@@ -96,6 +97,8 @@ def evaluate_with_laya_details(requirements_text: str, check_catalog: bool = Tru
     raw_decision = None
 
     try:
+        started = time.perf_counter()
+        logger.info("llm.call.started operation=requirement_completeness")
         router = LayaRouter(
             criteria=REQUIREMENT_CRITERIA,
             instructions=REQUIREMENT_INSTRUCTIONS,
@@ -106,7 +109,9 @@ def evaluate_with_laya_details(requirements_text: str, check_catalog: bool = Tru
         raw_decision = router.last_decision or {}
         ans = raw_decision.get("answers", {}).get("route", {})
         confidence = ans.get("answer_confidence") or ans.get("confidence")
+        logger.info("llm.call.completed operation=requirement_completeness duration_ms=%.2f", (time.perf_counter() - started) * 1000)
     except Exception:
+        logger.exception("llm.call.failed operation=requirement_completeness")
         laya_choice = "fallback"
 
     if has_3d_box or has_explicit_dims or has_catalog_ref or has_catalog_name:
@@ -240,26 +245,30 @@ def _fallback_extract(text: str, check_catalog: bool = True) -> Requirements:
         prod, explicit_snp = catalog_match
         pid = prod.get("id")
         snp_val = explicit_snp or prod.get("standard_no_of_parts") or 1
+        try:
+            dimensions = [float(prod.get("part_length")), float(prod.get("part_breadth")), float(prod.get("part_height"))]
+            weight = float(prod.get("part_weight"))
+        except (TypeError, ValueError):
+            raise ValueError(f"Catalog product '{prod.get('part_name', pid)}' has incomplete physical measurements")
+        if any(not math.isfinite(value) or value <= 0 for value in dimensions) or not math.isfinite(weight) or weight < 0:
+            raise ValueError(f"Catalog product '{prod.get('part_name', pid)}' has invalid physical measurements")
         return Requirements(
             name=str(prod.get("part_name", f"Product {pid}")),
             description=text.strip() or f"Catalog Product {pid}",
             snp=str(snp_val),
-            part_length=float(prod.get("part_length", 100.0)),
-            part_width=float(prod.get("part_breadth", prod.get("part_width", 80.0))),
-            part_height=float(prod.get("part_height", 50.0)),
+            part_length=dimensions[0],
+            part_width=dimensions[1],
+            part_height=dimensions[2],
             part_type=str(prod.get("part_type", "Standard")),
-            part_weight=float(prod.get("part_weight", 1.0)),
+            part_weight=weight,
             product_id=pid,
             matched_product_id=pid,
             extra={"product_id": pid, "matched_product_id": pid, "catalog_matched": True},
         )
 
-    def _search_num(pattern: str, default: float) -> float:
+    def _search_num(pattern: str) -> Optional[float]:
         m = re.search(pattern, text, re.IGNORECASE)
-        return float(m.group(1)) if m else default
-
-    # Exclude product ID mentions before extracting raw numbers
-    text_clean = re.sub(r"\bproduct\s*(?:id)?\s*[:#]?\s*\d+\b", "", text, flags=re.IGNORECASE)
+        return float(m.group(1)) if m else None
 
     # 1. 3D Dimensions: Check for compact 3D dimension box (e.g., 140x90x60mm or 140 x 90 x 60 mm)
     dim_box = re.search(r"(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)", text)
@@ -268,16 +277,23 @@ def _fallback_extract(text: str, check_catalog: bool = True) -> Requirements:
         width = float(dim_box.group(2))
         height = float(dim_box.group(3))
     else:
-        nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text_clean)]
-        length = _search_num(r"length\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[0] if len(nums) > 0 else 100.0)
-        width = _search_num(r"width\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[1] if len(nums) > 1 else 100.0)
-        height = _search_num(r"height\s*[:=]?\s*(\d+(?:\.\d+)?)", nums[2] if len(nums) > 2 else 50.0)
+        length = _search_num(r"length\s*[:=]?\s*(\d+(?:\.\d+)?)")
+        width = _search_num(r"width\s*[:=]?\s*(\d+(?:\.\d+)?)")
+        height = _search_num(r"height\s*[:=]?\s*(\d+(?:\.\d+)?)")
+    if any(value is None for value in (length, width, height)):
+        raise ValueError("Could not extract all three dimensions; provide LxWxH or explicit length, width, and height")
+    if any(not math.isfinite(value) or value <= 0 for value in (length, width, height)):
+        raise ValueError("Product dimensions must be finite positive values")
 
     # 2. Weight
-    weight = _search_num(r"weight\s*[:=]?\s*(\d+(?:\.\d+)?)", 0.0)
-    if weight == 0.0:
+    weight = _search_num(r"weight\s*[:=]?\s*(\d+(?:\.\d+)?)")
+    if weight is None:
         wt_m = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|kilos?|kilograms?|lbs?)\b", text, re.IGNORECASE)
-        weight = float(wt_m.group(1)) if wt_m else 1.0
+        weight = float(wt_m.group(1)) if wt_m else None
+    if weight is None:
+        raise ValueError("Could not extract product weight; provide a weight value with units")
+    if not math.isfinite(weight) or weight < 0:
+        raise ValueError("Product weight must be a finite non-negative value")
 
     # 3. Material
     mat_match = re.search(r"\b(steel|aluminum|plastic|glass|metal|brass|iron|wood|rubber|ceramic|copper)\b", text, re.IGNORECASE)
@@ -481,15 +497,22 @@ def extract_requirements(
         prod, explicit_snp = catalog_match
         pid = prod.get("id")
         snp_val = explicit_snp or prod.get("standard_no_of_parts") or 1
+        try:
+            dimensions = [float(prod.get("part_length")), float(prod.get("part_breadth")), float(prod.get("part_height"))]
+            weight = float(prod.get("part_weight"))
+        except (TypeError, ValueError):
+            raise ValueError(f"Catalog product '{prod.get('part_name', pid)}' has incomplete physical measurements")
+        if any(not math.isfinite(value) or value <= 0 for value in dimensions) or not math.isfinite(weight) or weight < 0:
+            raise ValueError(f"Catalog product '{prod.get('part_name', pid)}' has invalid physical measurements")
         res = Requirements(
             name=str(prod.get("part_name", f"Product {pid}")),
             description=req_text.strip() or f"Catalog Product {pid}",
             snp=str(snp_val),
-            part_length=float(prod.get("part_length", 100.0)),
-            part_width=float(prod.get("part_breadth", prod.get("part_width", 80.0))),
-            part_height=float(prod.get("part_height", 50.0)),
+            part_length=dimensions[0],
+            part_width=dimensions[1],
+            part_height=dimensions[2],
             part_type=str(prod.get("part_type", "Standard")),
-            part_weight=float(prod.get("part_weight", 1.0)),
+            part_weight=weight,
             product_id=pid,
             matched_product_id=pid,
             extra={"product_id": pid, "matched_product_id": pid, "catalog_matched": True},
