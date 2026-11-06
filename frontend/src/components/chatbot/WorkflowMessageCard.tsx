@@ -164,7 +164,7 @@ export default function WorkflowMessageCard({
       {result.confirmation_required && matchedProducts.length > 0 && (
         <div className="bg-sky-50/60 border-2 border-sky-300 rounded-2xl p-5 shadow-sm">
           <h3 className="text-base font-bold text-slate-900">Please confirm this packing list</h3>
-          <p className="text-xs text-slate-600 mt-1">I found these products in the catalog. Check the quantities, then confirm to start packing optimization.</p>
+          <p className="text-xs text-slate-600 mt-1">I found these products in the catalog. Confirm to add them to your optimization cart; you can add more products before running the optimizer.</p>
           <div className="mt-3 space-y-2">
             {matchedProducts.map((product, index) => (
               <div key={`${product.product_id}-${index}`} className="bg-white border border-sky-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
@@ -181,7 +181,7 @@ export default function WorkflowMessageCard({
             onClick={() => onConfirmProduct?.(matchedProducts, result.requested_quantity ?? matchedProducts.reduce((total, product) => total + product.quantity, 0))}
             className="mt-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-xs transition-all cursor-pointer"
           >
-            Confirm list & optimize package
+            Add confirmed products
           </button>
         </div>
       )}

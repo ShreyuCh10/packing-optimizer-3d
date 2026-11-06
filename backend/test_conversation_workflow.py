@@ -88,6 +88,27 @@ class ConversationWorkflowTests(unittest.TestCase):
         self.assertEqual([item.product_id for item in extracted], [1, 2])
         self.assertEqual([item.quantity for item in extracted], [20, 20])
 
+    def test_explicit_ids_override_name_only_llm_guesses(self):
+        class FakeExtractor:
+            def invoke(self, _prompt):
+                return requirement.RequirementTurnExtraction(
+                    items=[requirement.GatheredItem(name="Product 1", catalog_reference=True, quantity=20)],
+                    assistant_message="I found the products.",
+                )
+
+        class FakeLLM:
+            def with_structured_output(self, _schema):
+                return FakeExtractor()
+
+        with patch.object(requirement, "llm", FakeLLM()), \
+             patch.object(requirement, "get_product_by_id", side_effect=lambda pid: {"id": pid, "part_name": f"Product {pid}"}):
+            extracted = requirement.gather_requirements_turn(
+                "20 of product 1 and 20 of product 30 and 20 of product 10"
+            )
+
+        self.assertEqual([item["product_id"] for item in extracted["items"]], [1, 30, 10])
+        self.assertEqual([item["quantity"] for item in extracted["items"]], [20, 20, 20])
+
     def test_catalog_product_requires_confirmation_then_explicit_done_to_optimize(self):
         extraction = {
             "items": [{"product_id": 1, "name": "Catalog Bracket", "quantity": 6, "catalog_reference": True}],
@@ -124,6 +145,20 @@ class ConversationWorkflowTests(unittest.TestCase):
         self.assertEqual(result["action"], "conversation")
         self.assertEqual(result["status"], "conversation_gathering")
         optimize.assert_not_called()
+
+    def test_explicit_optimize_action_runs_confirmed_manifest_from_any_gathering_phase(self):
+        state = chat._new_state()
+        state["phase"] = "gathering"
+        state["manifest"] = [{"product_id": 1, "part_name": "Catalog Bracket", "quantity": 2}]
+        self.states["button-optimize"] = state
+        optimized = {"status": "workflow_completed_optimal_fit", "action": "optimized"}
+        with patch.object(chat, "_start_optimization", return_value=optimized) as start:
+            result = chat.process_chat_turn(
+                "button-optimize", {"action": "optimize", "text": "Optimize confirmed products"}
+            )
+
+        self.assertEqual(result["action"], "optimized")
+        start.assert_called_once()
 
     def test_add_another_reply_takes_precedence_over_leading_no(self):
         state = chat._new_state()

@@ -406,7 +406,10 @@ def gather_requirements_turn(
             extracted = RequirementTurnExtraction.model_validate(extracted)
         explicit_items = _explicit_catalog_items(message)
         if explicit_items:
-            extracted.items = [item for item in extracted.items if item.product_id is None] + explicit_items
+            # Explicit numeric catalog references and their nearby quantities
+            # are authoritative. Keeping name-only LLM guesses here can cause
+            # duplicate quantities or turn a valid ID into a false not-found.
+            extracted.items = explicit_items
         if not extracted.assistant_message.strip():
             extracted.assistant_message = "What else should I know about the part?"
         return {

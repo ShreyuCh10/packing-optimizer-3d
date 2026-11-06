@@ -48,6 +48,19 @@ export default function ChatbotView() {
       return []
     }
   })
+  const [taskItems, setTaskItems] = useState<Array<Record<string, any>>>(() => {
+    try {
+      const saved = localStorage.getItem('packing-optimizer-chat-task-manifest')
+      if (saved) return JSON.parse(saved) as Array<Record<string, any>>
+      const previousManifest = [...messages].reverse().find(
+        (message) => message.sender === 'assistant' && Array.isArray(message.taskManifest),
+      )?.taskManifest
+      return previousManifest ?? []
+    } catch {
+      return []
+    }
+  })
+  const [taskCartOpen, setTaskCartOpen] = useState(false)
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false)
@@ -62,6 +75,15 @@ export default function ChatbotView() {
       // Keep the in-memory conversation usable if browser storage is unavailable.
     }
   }, [messages])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('packing-optimizer-chat-task-manifest', JSON.stringify(taskItems))
+    } catch {
+      // Keep the in-memory packing list usable if browser storage is unavailable.
+    }
+    if (taskItems.length > 0) setTaskCartOpen(true)
+  }, [taskItems])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -79,7 +101,7 @@ export default function ChatbotView() {
     }
   }, [inputValue])
 
-  const handleSendMessage = async (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string, action?: 'optimize') => {
     const text = (textToSend ?? inputValue).trim()
     if (!text || isTyping) return
 
@@ -96,16 +118,18 @@ export default function ChatbotView() {
       textareaRef.current.style.height = 'auto'
     }
     const lastAssistant = [...messages].reverse().find((message) => message.sender === 'assistant')
-    const shouldRunWorkflow = lastAssistant?.workflowStatus === 'awaiting_more_items' && isDoneIntent(text)
+    const shouldRunWorkflow = action === 'optimize' || (lastAssistant?.workflowStatus === 'awaiting_more_items' && isDoneIntent(text))
     setIsWorkflowRunning(shouldRunWorkflow)
     setCurrentWorkflowStep(shouldRunWorkflow ? 'Starting the confirmed optimization task' : 'Connecting to the requirement agent')
     setIsTyping(true)
 
     try {
       const result: WorkflowResult = await runWorkflow({
-        user_input: text,
+        user_input: action ? { action, text } : text,
         conversation_id: conversationId,
       }, setCurrentWorkflowStep)
+
+      if (result.task_manifest) setTaskItems(result.task_manifest)
 
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
@@ -135,6 +159,11 @@ export default function ChatbotView() {
     }
   }
 
+  const handleOptimizeTask = () => {
+    if (!taskItems.length || isTyping) return
+    handleSendMessage('Optimize confirmed products', 'optimize')
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -144,7 +173,10 @@ export default function ChatbotView() {
 
   const handleNewChat = () => {
     setMessages([])
+    setTaskItems([])
+    setTaskCartOpen(false)
     localStorage.removeItem('packing-optimizer-chat-messages')
+    localStorage.removeItem('packing-optimizer-chat-task-manifest')
     const nextConversationId = crypto.randomUUID()
     setConversationId(nextConversationId)
     localStorage.setItem('packing-optimizer-conversation-id', nextConversationId)
@@ -196,6 +228,8 @@ export default function ChatbotView() {
             },
       }
       const result: WorkflowResult = await runWorkflow(payload, setCurrentWorkflowStep)
+
+      if (result.task_manifest) setTaskItems(result.task_manifest)
 
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
@@ -364,6 +398,63 @@ export default function ChatbotView() {
             <div ref={messagesEndRef} />
           </div>
         )}
+      </div>
+
+      {/* Conversation-scoped optimization cart */}
+      <div className="fixed bottom-20 right-4 z-40 flex flex-col items-end gap-2">
+        {taskCartOpen && (
+          <section className="w-[min(21rem,calc(100vw-2rem))] max-h-[55vh] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">Optimization cart</h2>
+                <p className="text-[11px] text-slate-500">Confirmed catalog products for this chat</p>
+              </div>
+              <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-bold text-sky-800">
+                {taskItems.reduce((total, item) => total + (Number(item.quantity ?? item.snp) || 1), 0)}
+              </span>
+            </div>
+            {taskItems.length ? (
+              <>
+                <ul className="max-h-[32vh] space-y-2 overflow-y-auto px-4 py-3">
+                  {taskItems.map((item, index) => (
+                    <li key={`${item.product_id ?? item.part_name ?? item.name ?? 'product'}-${index}`} className="flex items-start justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-800">{item.part_name ?? item.name ?? 'Catalog product'}</div>
+                        {item.product_id != null && <div className="text-[10px] text-slate-500">Product ID #{item.product_id}</div>}
+                      </div>
+                      <span className="shrink-0 font-bold text-slate-700">× {Number(item.quantity ?? item.snp) || 1}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="border-t border-slate-100 p-3">
+                  <button
+                    type="button"
+                    onClick={handleOptimizeTask}
+                    disabled={isTyping}
+                    className="w-full rounded-xl bg-sky-600 px-3 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isWorkflowRunning ? currentWorkflowStep || 'Optimizing packing list…' : 'Optimize packing list'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="px-4 py-4 text-xs leading-relaxed text-slate-500">Confirmed products will appear here. Look up and confirm a catalog product to add it.</p>
+            )}
+          </section>
+        )}
+        <button
+          type="button"
+          onClick={() => setTaskCartOpen((open) => !open)}
+          aria-label={taskCartOpen ? 'Close optimization cart' : 'Open optimization cart'}
+          className="flex items-center gap-2 rounded-full border border-sky-700 bg-sky-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-sky-700"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.5l1.8 12.1a2 2 0 002 1.7h10.9a2 2 0 002-1.6L22 8H5" />
+            <circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" />
+          </svg>
+          <span>Task cart</span>
+          <span className="rounded-full bg-white/20 px-1.5 py-0.5">{taskItems.length}</span>
+        </button>
       </div>
 
       {/* Bottom Input Dock */}

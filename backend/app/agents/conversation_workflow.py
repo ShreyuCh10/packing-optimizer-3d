@@ -235,6 +235,25 @@ def process_chat_turn(
 
     phase = state.get("phase", "gathering")
     confirmed_payload = isinstance(user_input, dict) and bool(user_input.get("confirmed") or user_input.get("is_confirmed"))
+    optimize_action = isinstance(user_input, dict) and user_input.get("action") == "optimize"
+
+    if optimize_action:
+        if phase == "awaiting_catalog_confirmation":
+            return _reply(
+                conversation_id,
+                state,
+                "Please confirm or reject the pending catalog products before optimizing the confirmed task.",
+                status="awaiting_confirmation",
+            )
+        if not state.get("manifest"):
+            return _reply(
+                conversation_id,
+                state,
+                "There are no confirmed products in the optimization cart yet. Add and confirm a catalog product first.",
+            )
+        return _start_optimization(
+            conversation_id, state, allow_rotation, keep_upright, max_candidate_packages, on_stage
+        )
 
     if phase == "awaiting_catalog_confirmation":
         if confirmed_payload or _is_yes(message):
