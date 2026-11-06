@@ -5,10 +5,10 @@ import WorkflowMessageCard from './WorkflowMessageCard'
 
 const QUICK_PROMPTS = [
   {
-    title: 'Standard Part Packaging',
-    subtitle: '4 steel brackets measuring 140×90×60mm, 1.2kg',
+    title: 'Look Up a Catalog Product',
+    subtitle: 'Search by product name or ID',
     prompt:
-      'Find a suitable package for 4 steel brackets measuring 140x90x60mm with weight 1.2kg each.',
+      'Can you help me find a product in the catalog?',
   },
   {
     title: 'Catalog Product Auto-Lookup',
@@ -21,20 +21,47 @@ const QUICK_PROMPTS = [
     prompt:
       'Pack product 45 (Solid Counterweight Ingot). This part is heavy and will require industrial packaging.',
   },
-  {
-    title: 'Ambiguous Spec (Test HITL)',
-    subtitle: 'Missing dimensions triggers Human-In-The-Loop',
-    prompt: 'I have some metal brackets that need packaging for shipment.',
-  },
 ]
 
+const isDoneIntent = (text: string) => {
+  if (/\b(?:add another|another (?:product|item)|one more)\b/i.test(text)) return false
+  return /^\s*(?:no|nope|done|finished|complete|proceed|that's all|that is all|all set|nothing else|optimi[sz]e|start packing|start optimi[sz]ation)\b/i.test(text)
+}
+
 export default function ChatbotView() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [conversationId, setConversationId] = useState(() => {
+    try {
+      const saved = localStorage.getItem('packing-optimizer-conversation-id')
+      if (saved) return saved
+      const created = crypto.randomUUID()
+      localStorage.setItem('packing-optimizer-conversation-id', created)
+      return created
+    } catch {
+      return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
+  })
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem('packing-optimizer-chat-messages')
+      return saved ? JSON.parse(saved) as ChatMessage[] : []
+    } catch {
+      return []
+    }
+  })
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
-  const [currentRunningStage, setCurrentRunningStage] = useState<string>('laya')
+  const [isWorkflowRunning, setIsWorkflowRunning] = useState(false)
+  const [currentWorkflowStep, setCurrentWorkflowStep] = useState<string>('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('packing-optimizer-chat-messages', JSON.stringify(messages))
+    } catch {
+      // Keep the in-memory conversation usable if browser storage is unavailable.
+    }
+  }, [messages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -52,28 +79,6 @@ export default function ChatbotView() {
     }
   }, [inputValue])
 
-  // Animated pipeline progress simulation while awaiting backend response
-  useEffect(() => {
-    if (!isTyping) {
-      setCurrentRunningStage('laya')
-      return
-    }
-
-    const t1 = setTimeout(() => setCurrentRunningStage('extractor'), 400)
-    const t2 = setTimeout(() => setCurrentRunningStage('cushioning'), 800)
-    const t3 = setTimeout(() => setCurrentRunningStage('sqlite'), 1300)
-    const t4 = setTimeout(() => setCurrentRunningStage('optimizer'), 1800)
-    const t5 = setTimeout(() => setCurrentRunningStage('reasoning'), 2400)
-
-    return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
-      clearTimeout(t3)
-      clearTimeout(t4)
-      clearTimeout(t5)
-    }
-  }, [isTyping])
-
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend ?? inputValue).trim()
     if (!text || isTyping) return
@@ -90,27 +95,26 @@ export default function ChatbotView() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
+    const lastAssistant = [...messages].reverse().find((message) => message.sender === 'assistant')
+    const shouldRunWorkflow = lastAssistant?.workflowStatus === 'awaiting_more_items' && isDoneIntent(text)
+    setIsWorkflowRunning(shouldRunWorkflow)
+    setCurrentWorkflowStep(shouldRunWorkflow ? 'Starting the confirmed optimization task' : 'Connecting to the requirement agent')
     setIsTyping(true)
 
     try {
-      // Check if user is referencing a product by ID directly (e.g. "product 1" or "product id 1")
-      let workflowPayload: any = text
-      const prodMatch = text.match(/\bproduct\s*(?:id)?\s*[:#]?\s*(\d+)\b/i)
-      if (prodMatch) {
-        workflowPayload = {
-          product_id: parseInt(prodMatch[1], 10),
-          user_input: text,
-        }
-      }
-
-      const result: WorkflowResult = await runWorkflow(workflowPayload)
+      const result: WorkflowResult = await runWorkflow({
+        user_input: text,
+        conversation_id: conversationId,
+      }, setCurrentWorkflowStep)
 
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         sender: 'assistant',
         text: result.summary || 'Unified packaging workflow completed.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        workflowResult: result,
+        workflowResult: result.action === 'conversation' ? undefined : result,
+        taskManifest: result.task_manifest,
+        workflowStatus: result.status,
       }
 
       setMessages((prev) => [...prev, assistantMessage])
@@ -126,6 +130,8 @@ export default function ChatbotView() {
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsTyping(false)
+      setIsWorkflowRunning(false)
+      setCurrentWorkflowStep('')
     }
   }
 
@@ -138,12 +144,85 @@ export default function ChatbotView() {
 
   const handleNewChat = () => {
     setMessages([])
+    localStorage.removeItem('packing-optimizer-chat-messages')
+    const nextConversationId = crypto.randomUUID()
+    setConversationId(nextConversationId)
+    localStorage.setItem('packing-optimizer-conversation-id', nextConversationId)
     setInputValue('')
     setIsTyping(false)
+    setIsWorkflowRunning(false)
+    setCurrentWorkflowStep('')
   }
 
   const handleApplyPrompt = (promptText: string) => {
     handleSendMessage(promptText)
+  }
+
+  const handleConfirmProduct = async (product: any, quantity: number) => {
+    if (isTyping) return
+
+    const isManifest = Array.isArray(product)
+    const confirmText = isManifest
+      ? `Confirmed packing list: ${product.map((item: any) => `${item.quantity} Ã— ${item.part_name}`).join(', ')}.`
+      : `Confirmed: Pack ${quantity} unit(s) of "${product.part_name}" (Product ID #${product.id}).`
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      sender: 'user',
+      text: confirmText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    setIsWorkflowRunning(false)
+    setCurrentWorkflowStep('Adding the confirmed products to your task')
+    setIsTyping(true)
+
+    try {
+      const payload = {
+        conversation_id: conversationId,
+        user_input: isManifest
+          ? {
+              items: product.map((item: any) => ({ ...item, number_of_parts: item.quantity })),
+              text: confirmText,
+              confirmed: true,
+            }
+          : {
+              product_id: product.id,
+              part_name: product.part_name,
+              quantity: quantity,
+              snp: quantity,
+              text: confirmText,
+              confirmed: true,
+            },
+      }
+      const result: WorkflowResult = await runWorkflow(payload, setCurrentWorkflowStep)
+
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        sender: 'assistant',
+        text: result.summary || 'Unified packaging workflow completed.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        workflowResult: result.action === 'conversation' ? undefined : result,
+        taskManifest: result.task_manifest,
+        workflowStatus: result.status,
+      }
+
+      setMessages((prev) => [...prev, assistantMessage])
+    } catch (err: any) {
+      console.error('Unified workflow API call failed on confirm:', err)
+      const errorMessage: ChatMessage = {
+        id: `assistant-err-${Date.now()}`,
+        sender: 'assistant',
+        text: `Error optimizing confirmed product: ${err.message || 'Unknown network or backend failure'}.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isError: true,
+      }
+      setMessages((prev) => [...prev, errorMessage])
+    } finally {
+      setIsTyping(false)
+      setIsWorkflowRunning(false)
+      setCurrentWorkflowStep('')
+    }
   }
 
   return (
@@ -242,6 +321,7 @@ export default function ChatbotView() {
                       <WorkflowMessageCard
                         result={msg.workflowResult}
                         onApplyPrompt={handleApplyPrompt}
+                        onConfirmProduct={handleConfirmProduct}
                       />
                     ) : (
                       <div
@@ -252,128 +332,35 @@ export default function ChatbotView() {
                         {msg.text}
                       </div>
                     )}
+                    {msg.taskManifest && msg.taskManifest.length > 0 && (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Current optimization task</div>
+                        <ul className="space-y-1.5 text-xs text-slate-700">
+                          {msg.taskManifest.map((item, index) => (
+                            <li key={`${item.product_id ?? item.name ?? item.part_name ?? 'item'}-${index}`}>
+                              {item.quantity ?? item.snp ?? 1} Ã— {item.part_name ?? item.name ?? 'Part'}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
             })}
 
-            {/* Real-time Multi-Agent Progress Indicator */}
             {isTyping && (
               <div className="flex gap-3 sm:gap-4 items-start animate-fade-in">
-                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 text-xs font-bold shadow-2xs">
-                  AI
-                </div>
-                <div className="flex-1 bg-slate-50 border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
-                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                      Executing Packaging Workflow
-                    </span>
+                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 text-xs font-bold shadow-2xs">AI</div>
+                <div className="flex-1 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-sky-950">
+                    <span className="h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
+                    {currentWorkflowStep || (isWorkflowRunning ? 'Running the confirmed optimization task' : 'Working on your message')}
                   </div>
-
-                  {/* Visual workflow progression mini-stepper */}
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'laya'
-                            ? 'bg-sky-600 text-white animate-pulse'
-                            : 'bg-emerald-500 text-white'
-                        }`}
-                      >
-                        {currentRunningStage === 'laya' ? '1' : '✓'}
-                      </span>
-                      <span className={currentRunningStage === 'laya' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 1: Laya Semantic Gating Router (evaluating confidence & completeness)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'extractor'
-                            ? 'bg-sky-600 text-white animate-pulse'
-                            : currentRunningStage === 'laya'
-                            ? 'bg-slate-200 text-slate-500'
-                            : 'bg-emerald-500 text-white'
-                        }`}
-                      >
-                        {currentRunningStage === 'extractor' ? '2' : currentRunningStage === 'laya' ? '2' : '✓'}
-                      </span>
-                      <span className={currentRunningStage === 'extractor' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 2: Specification Extractor (extracting geometries, weight, SNP & material)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'cushioning'
-                            ? 'bg-sky-600 text-white animate-pulse'
-                            : ['laya', 'extractor'].includes(currentRunningStage)
-                            ? 'bg-slate-200 text-slate-500'
-                            : 'bg-emerald-500 text-white'
-                        }`}
-                      >
-                        {currentRunningStage === 'cushioning' ? '3' : ['laya', 'extractor'].includes(currentRunningStage) ? '3' : '✓'}
-                      </span>
-                      <span className={currentRunningStage === 'cushioning' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 3: Cushioning Engine (calculating foam clearance & multi-unit bounding box)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'sqlite'
-                            ? 'bg-sky-600 text-white animate-pulse'
-                            : ['optimizer', 'reasoning'].includes(currentRunningStage)
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-slate-200 text-slate-500'
-                        }`}
-                      >
-                        {currentRunningStage === 'sqlite' ? '4' : currentRunningStage === 'optimizer' ? '✓' : '4'}
-                      </span>
-                      <span className={currentRunningStage === 'sqlite' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 4: SQLite Database Query (scanning cartons, stillages & pallets)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'optimizer'
-                            ? 'bg-sky-600 text-white animate-pulse'
-                            : 'bg-slate-200 text-slate-500'
-                        }`}
-                      >
-                        5
-                      </span>
-                      <span className={currentRunningStage === 'optimizer' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 5: Deterministic 3D fit and weight validation
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          currentRunningStage === 'reasoning'
-                            ? 'bg-sky-600 text-white animate-pulse'
-                            : currentRunningStage === 'optimizer'
-                            ? 'bg-slate-200 text-slate-500'
-                            : 'bg-emerald-500 text-white'
-                        }`}
-                      >
-                        {currentRunningStage === 'reasoning' ? '6' : '✓'}
-                      </span>
-                      <span className={currentRunningStage === 'reasoning' ? 'font-semibold text-sky-900' : 'text-slate-500'}>
-                        Step 6: GPT-5.1 package reasoning and recommendation
-                      </span>
-                    </div>
-                  </div>
+                  {isWorkflowRunning && <div className="mt-1.5 text-xs text-sky-800">The backend will update this label as each workflow stage begins.</div>}
                 </div>
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </div>
         )}

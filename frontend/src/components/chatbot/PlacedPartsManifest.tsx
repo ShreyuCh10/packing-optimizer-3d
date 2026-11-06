@@ -105,7 +105,7 @@ export default function PlacedPartsManifest({
             <span>
               Coordinates $(X, Y, Z)$ represent the front-bottom-left corner of each part inside the container.
             </span>
-            <span className="font-medium text-slate-700">{totalItems} Placed Parts</span>
+            <span className="font-medium text-slate-700">{totalItems} Placed Products</span>
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
@@ -113,7 +113,7 @@ export default function PlacedPartsManifest({
               <thead>
                 <tr className="bg-slate-100 text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                   <th className="py-2 px-2.5 font-bold">#</th>
-                  <th className="py-2 px-2.5 font-bold">Part ID</th>
+                  <th className="py-2 px-2.5 font-bold">Product</th>
                   <th className="py-2 px-2.5 font-bold">Orientation (L × W × H)</th>
                   <th className="py-2 px-2.5 font-bold">3D Position (X, Y, Z mm)</th>
                   <th className="py-2 px-2.5 font-bold text-right">Weight</th>
@@ -135,8 +135,8 @@ export default function PlacedPartsManifest({
                         />
                         <span className="font-sans font-bold text-slate-400">{idx + 1}</span>
                       </td>
-                      <td className="py-1.5 px-2.5 font-sans font-medium text-slate-900 truncate max-w-[120px]">
-                        {item.item_id || `item_${idx + 1}`}
+                      <td className="py-1.5 px-2.5 font-sans font-medium text-slate-900 truncate max-w-[180px]" title={item.name || item.item_name || item.item_id}>
+                        {item.name || item.item_name || item.item_id || `item_${idx + 1}`}
                       </td>
                       <td className="py-1.5 px-2.5 text-sky-800 font-bold">
                         {dims.length} × {dims.width} × {dims.height} mm

@@ -1,10 +1,20 @@
 import os
+import re
 import sqlite3
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 DEFAULT_DB_PATH = os.path.join(BACKEND_DIR, "data", "products.db")
-DB_PATH = os.environ.get("SQLITE_DB_PATH", DEFAULT_DB_PATH)
+PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
+_configured_db_path = os.environ.get("SQLITE_DB_PATH")
+if not _configured_db_path:
+    DB_PATH = DEFAULT_DB_PATH
+elif os.path.isabs(_configured_db_path):
+    DB_PATH = _configured_db_path
+else:
+    normalized_db_path = os.path.normpath(_configured_db_path)
+    path_root = PROJECT_ROOT if normalized_db_path.split(os.sep, 1)[0].lower() == os.path.basename(BACKEND_DIR).lower() else BACKEND_DIR
+    DB_PATH = os.path.abspath(os.path.join(path_root, normalized_db_path))
 
 
 def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
@@ -729,5 +739,105 @@ def clear_cart(db_path: Optional[str] = None) -> int:
         cursor.execute("DELETE FROM sqlite_sequence WHERE name='cart'")
         conn.commit()
         return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def get_sample_products(limit: int = 5, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve a sample of catalog products for user guidance."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, part_name, part_type, standard_no_of_parts FROM products ORDER BY id ASC LIMIT ?", (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def match_product_from_text(
+    text: str,
+    product_id: Optional[int] = None,
+    db_path: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Find a product in the SQLite database based on ID or text keywords.
+    Returns (best_match, top_candidates). If no valid database product matches, returns (None, []).
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+
+        # 1. Check direct product_id
+        if product_id is not None:
+            cursor.execute("SELECT * FROM products WHERE id = ? LIMIT 1", (int(product_id),))
+            r = cursor.fetchone()
+            if r:
+                prod = dict(r)
+                return prod, [prod]
+
+        clean_text = str(text or "").strip()
+        if not clean_text:
+            return None, []
+
+        # 2. Check if text mentions 'product <number>' or 'product id <number>' or '#<number>'
+        match_id = re.search(r"\b(?:product\s*(?:id)?|#)\s*[:#]?\s*(\d+)\b", clean_text, re.IGNORECASE)
+        if match_id:
+            pid = int(match_id.group(1))
+            cursor.execute("SELECT * FROM products WHERE id = ? LIMIT 1", (pid,))
+            r = cursor.fetchone()
+            if r:
+                prod = dict(r)
+                return prod, [prod]
+
+        # 3. Check exact name match (case-insensitive)
+        cursor.execute("SELECT * FROM products WHERE LOWER(part_name) = LOWER(?) LIMIT 1", (clean_text,))
+        r = cursor.fetchone()
+        if r:
+            prod = dict(r)
+            return prod, [prod]
+
+        # 4. Search all products with scoring
+        cursor.execute("SELECT * FROM products ORDER BY id ASC")
+        all_prods = [dict(row) for row in cursor.fetchall()]
+
+        text_lower = clean_text.lower()
+        stopwords = {
+            "pack", "packaging", "package", "units", "unit", "pieces", "piece",
+            "parts", "part", "items", "item", "boxes", "box", "for", "the", "a",
+            "an", "i", "need", "want", "please", "confirm", "confirmed", "looking",
+            "lookup", "find", "and", "with", "of", "in", "to", "can", "you", "measuring",
+            "weighing", "weight", "dimensions", "size", "made"
+        }
+        tokens = [t for t in re.findall(r"[a-z0-9]+", text_lower) if t not in stopwords and not t.isdigit() and len(t) >= 2]
+
+        scored_candidates = []
+        for p in all_prods:
+            pname = p["part_name"].lower()
+            p_tokens = set(re.findall(r"[a-z0-9]+", pname))
+            score = 0
+
+            # Exact or close substring
+            if pname in text_lower:
+                score += 100
+            elif any(part_segment in text_lower for part_segment in pname.split(" ") if len(part_segment) >= 4):
+                score += 30
+
+            # Token overlap
+            overlap = sum(1 for t in tokens if t in p_tokens or any(t in pt for pt in p_tokens))
+            score += overlap * 25
+
+            # Material match
+            ptype = (p.get("part_type") or "").lower()
+            if ptype and ptype in text_lower:
+                score += 10
+
+            if score >= 30:
+                scored_candidates.append((score, p))
+
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        if scored_candidates:
+            top_prods = [p for _, p in scored_candidates[:5]]
+            return top_prods[0], top_prods
+
+        return None, []
     finally:
         conn.close()

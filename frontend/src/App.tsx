@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import ProductsView from './components/products/ProductsView'
 import PackagesView from './components/packages/PackagesView'
 import ChatbotView from './components/chatbot/ChatbotView'
+import CartModal from './components/cart/CartModal'
+import { fetchCart } from './services/cartApi'
+import type { CartSummary } from './types/cart'
 
 type PageKey = 'products' | 'packages' | 'optimiser' | 'chatbot'
 
@@ -37,6 +40,35 @@ const NAV_ITEMS: NavItem[] = [
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activePage, setActivePage] = useState<PageKey>('products')
+  const [isCartModalOpen, setIsCartModalOpen] = useState(false)
+  const [cartCount, setCartCount] = useState<number>(0)
+
+  const refreshCartCount = async () => {
+    try {
+      const data = await fetchCart()
+      setCartCount(data.total_parts || 0)
+    } catch {
+      // Backend may not be reachable initially
+    }
+  }
+
+  useEffect(() => {
+    refreshCartCount()
+
+    const handleCartEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<CartSummary | undefined>
+      if (customEvent.detail && typeof customEvent.detail.total_parts === 'number') {
+        setCartCount(customEvent.detail.total_parts)
+      } else {
+        refreshCartCount()
+      }
+    }
+
+    window.addEventListener('cart-updated', handleCartEvent)
+    return () => {
+      window.removeEventListener('cart-updated', handleCartEvent)
+    }
+  }, [])
 
   const currentPage = NAV_ITEMS.find((item) => item.key === activePage) ?? NAV_ITEMS[0]
 
@@ -78,7 +110,40 @@ export default function App() {
           </div>
         </div>
 
-        <div className="text-xs text-slate-500 font-medium">v1.0.0</div>
+        {/* Right Header: Cart Button & Version */}
+        <div className="flex items-center gap-3">
+          {/* Cart Button visible across all pages */}
+          <button
+            type="button"
+            onClick={() => setIsCartModalOpen(true)}
+            aria-label="Open Cart Modal"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-sky-800 bg-sky-50 border border-sky-300 rounded-lg hover:bg-sky-100 hover:text-sky-950 active:scale-[0.98] transition-all duration-150 cursor-pointer shadow-2xs"
+          >
+            <svg
+              className="w-4 h-4 text-sky-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"
+              />
+            </svg>
+            <span>Cart</span>
+            {cartCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-sky-600 text-white min-w-[18px] text-center">
+                {cartCount}
+              </span>
+            )}
+          </button>
+
+          <div className="hidden sm:block text-xs text-slate-400 font-medium border-l border-slate-200 pl-3">
+            v1.0.0
+          </div>
+        </div>
       </header>
 
       {/* Backdrop for Sidebar */}
@@ -177,6 +242,13 @@ export default function App() {
           )}
         </main>
       )}
+
+      {/* Global Cart Modal accessible from any page */}
+      <CartModal
+        isOpen={isCartModalOpen}
+        onClose={() => setIsCartModalOpen(false)}
+        onCartUpdated={(cartData) => setCartCount(cartData.total_parts || 0)}
+      />
     </div>
   )
 }

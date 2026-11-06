@@ -1,6 +1,13 @@
 from typing import Optional, Dict, Any
+from uuid import uuid4
+import json
+import logging
+import queue
+import threading
+import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
 
 from app.agents.requirement import (
     app as requirement_app,
@@ -11,6 +18,7 @@ from app.agents.requirement import (
 )
 
 router = APIRouter(prefix="/requirements", tags=["Requirements Agent"])
+logger = logging.getLogger(__name__)
 
 
 class RequirementInput(BaseModel):
@@ -116,20 +124,102 @@ def retrieve_packages(input_data: RetrievalInput):
         raise HTTPException(status_code=500, detail=f"Retrieval agent failed: {str(e)}")
 
 
+def _run_chat_turn(input_data: Dict[str, Any], on_stage=None) -> Dict[str, Any]:
+    from app.agents.conversation_workflow import process_chat_turn
+    user_in = input_data.get("user_input", input_data)
+    conversation_id = str(input_data.get("conversation_id") or uuid4())
+    return process_chat_turn(
+        conversation_id=conversation_id,
+        user_input=user_in,
+        allow_rotation=input_data.get("allow_rotation", True),
+        keep_upright=input_data.get("keep_upright", False),
+        max_candidate_packages=input_data.get("max_candidate_packages", 5),
+        on_stage=on_stage,
+    )
+
+
+@router.post("/workflow/stream", summary="Run stateful packaging workflow with live stage updates")
+def run_workflow_stream_endpoint(input_data: Dict[str, Any]):
+    """Stream actual backend stage changes followed by the completed workflow result."""
+    events: queue.Queue = queue.Queue()
+
+    def execute():
+        started = time.perf_counter()
+        try:
+            result = _run_chat_turn(input_data, on_stage=lambda label: events.put({"type": "progress", "label": label}))
+            events.put({"type": "result", "result": result})
+            logger.info("api.workflow.completed conversation_id=%s duration_ms=%.2f", result.get("conversation_id"), (time.perf_counter() - started) * 1000)
+        except Exception as exc:
+            logger.exception("api.workflow.failed duration_ms=%.2f", (time.perf_counter() - started) * 1000)
+            events.put({"type": "error", "message": str(exc)})
+        finally:
+            events.put(None)
+
+    def event_stream():
+        worker = threading.Thread(target=execute, daemon=True)
+        worker.start()
+        while True:
+            event = events.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/workflow/execute", summary="Run a catalog-validated structured packing manifest")
+def execute_workflow_endpoint(input_data: Dict[str, Any]):
+    """Run an already selected cart manifest through catalog validation and full optimization."""
+    started = time.perf_counter()
+    user_input = input_data.get("user_input", input_data)
+    if not isinstance(user_input, dict) or not isinstance(user_input.get("items"), list) or not user_input["items"]:
+        raise HTTPException(status_code=400, detail="A non-empty cart product manifest is required.")
+    try:
+        from app.agents.workflow import run_unified_workflow
+
+        result = run_unified_workflow(
+            user_input,
+            allow_rotation=input_data.get("allow_rotation", True),
+            keep_upright=input_data.get("keep_upright", False),
+            max_candidate_packages=input_data.get("max_candidate_packages", 5),
+        )
+        requirement_items = (result.get("requirements") or {}).get("items") or []
+        result["task_manifest"] = [
+            {
+                "product_id": item.get("product_id") or item.get("matched_product_id"),
+                "part_name": item.get("part_name") or item.get("name"),
+                "name": item.get("part_name") or item.get("name"),
+                "quantity": int(item.get("quantity") or item.get("number_of_parts") or item.get("snp") or 1),
+            }
+            for item in requirement_items
+        ] or [
+            {
+                "product_id": item.get("product_id"),
+                "part_name": item.get("part_name") or item.get("name"),
+                "name": item.get("part_name") or item.get("name"),
+                "quantity": int(item.get("number_of_parts") or item.get("quantity") or item.get("snp") or 1),
+            }
+            for item in user_input["items"]
+        ]
+        if result.get("stage") == "packing_optimization":
+            result["action"] = "optimized"
+        logger.info("api.workflow.execute.completed item_count=%d duration_ms=%.2f", len(user_input["items"]), (time.perf_counter() - started) * 1000)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("api.workflow.execute.failed duration_ms=%.2f", (time.perf_counter() - started) * 1000)
+        raise HTTPException(status_code=500, detail=f"Cart optimization workflow failed: {str(exc)}")
+
+
 @router.post("/workflow", summary="Run End-to-End 3-Agent Packaging Workflow")
 def run_workflow_endpoint(input_data: Dict[str, Any]):
-    """Execute the full 3-Agent pipeline: Requirement Gathering -> Retrieval & Gathering -> 3D Packing Optimization."""
-    from app.agents.workflow import run_unified_workflow
+    """Process a stateful chat turn, then optimize after the user finishes adding requirements."""
+    started = time.perf_counter()
     try:
-        user_in = input_data.get("user_input", input_data)
-        allow_rot = input_data.get("allow_rotation", True)
-        keep_up = input_data.get("keep_upright", False)
-        max_c = input_data.get("max_candidate_packages", 5)
-        return run_unified_workflow(
-            user_input=user_in,
-            allow_rotation=allow_rot,
-            keep_upright=keep_up,
-            max_candidate_packages=max_c,
-        )
+        result = _run_chat_turn(input_data)
+        logger.info("api.workflow.completed conversation_id=%s duration_ms=%.2f", result.get("conversation_id"), (time.perf_counter() - started) * 1000)
+        return result
     except Exception as e:
+        logger.exception("api.workflow.failed duration_ms=%.2f", (time.perf_counter() - started) * 1000)
         raise HTTPException(status_code=500, detail=f"Unified workflow failed: {str(e)}")

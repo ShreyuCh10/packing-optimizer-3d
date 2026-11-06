@@ -2,6 +2,12 @@ import type { CartSummary, CartItem, AddToCartPayload } from '../types/cart'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
+function notifyCartUpdated(cart?: CartSummary) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cart-updated', { detail: cart }))
+  }
+}
+
 export async function fetchCart(): Promise<CartSummary> {
   const res = await fetch(`${API_BASE}/cart`)
   if (!res.ok) {
@@ -27,7 +33,9 @@ export async function addToCart(payload: AddToCartPayload): Promise<{
     const errorData = await res.json().catch(() => ({}))
     throw new Error(errorData.detail || `Failed to add product to cart: ${res.statusText}`)
   }
-  return res.json()
+  const data = await res.json()
+  notifyCartUpdated(data.cart)
+  return data
 }
 
 export async function updateCartItemQuantity(
@@ -50,7 +58,9 @@ export async function updateCartItemQuantity(
     const errorData = await res.json().catch(() => ({}))
     throw new Error(errorData.detail || `Failed to update cart item: ${res.statusText}`)
   }
-  return res.json()
+  const data = await res.json()
+  notifyCartUpdated(data.cart)
+  return data
 }
 
 export async function removeCartItem(itemId: number): Promise<{
@@ -65,7 +75,9 @@ export async function removeCartItem(itemId: number): Promise<{
     const errorData = await res.json().catch(() => ({}))
     throw new Error(errorData.detail || `Failed to delete cart item: ${res.statusText}`)
   }
-  return res.json()
+  const data = await res.json()
+  notifyCartUpdated(data.cart)
+  return data
 }
 
 export async function clearCart(): Promise<{
@@ -80,6 +92,7 @@ export async function clearCart(): Promise<{
     const errorData = await res.json().catch(() => ({}))
     throw new Error(errorData.detail || `Failed to clear cart: ${res.statusText}`)
   }
-  return res.json()
+  const data = await res.json()
+  notifyCartUpdated(data.cart)
+  return data
 }
-

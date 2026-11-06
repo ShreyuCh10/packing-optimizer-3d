@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { Product } from '../../types/customBox'
 import { fetchProducts } from '../../services/productsApi'
-import { fetchCart } from '../../services/cartApi'
 import ProductCard from './ProductCard'
 import ProductModal from './ProductModal'
 import AddProductModal from './AddProductModal'
-import CartModal from '../cart/CartModal'
 
 export default function ProductsView() {
   const [products, setProducts] = useState<Product[]>([])
@@ -15,8 +13,6 @@ export default function ProductsView() {
   const [selectedType, setSelectedType] = useState<string>('All')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false)
-  const [isCartModalOpen, setIsCartModalOpen] = useState<boolean>(false)
-  const [cartCount, setCartCount] = useState<number>(0)
 
   const loadProducts = async () => {
     setLoading(true)
@@ -32,18 +28,8 @@ export default function ProductsView() {
     }
   }
 
-  const refreshCartBadge = async () => {
-    try {
-      const cartData = await fetchCart()
-      setCartCount(cartData.total_parts || 0)
-    } catch {
-      // ignore if backend not reachable yet
-    }
-  }
-
   useEffect(() => {
     loadProducts()
-    refreshCartBadge()
   }, [])
 
   // Collect unique part types for category filtering
@@ -87,33 +73,6 @@ export default function ProductsView() {
 
         {/* Action Buttons: Add New Product, Cart & Refresh */}
         <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
-          {/* Cart Button */}
-          <button
-            type="button"
-            onClick={() => setIsCartModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-sky-800 bg-sky-50 border border-sky-300 rounded-md hover:bg-sky-100 hover:text-sky-950 active:scale-[0.98] transition-all duration-150 cursor-pointer shadow-2xs"
-          >
-            <svg
-              className="w-4 h-4 text-sky-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"
-              />
-            </svg>
-            <span>Cart</span>
-            {cartCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-sky-600 text-white">
-                {cartCount}
-              </span>
-            )}
-          </button>
-
           {/* Add New Product Button */}
           <button
             type="button"
@@ -306,7 +265,6 @@ export default function ProductsView() {
       <ProductModal
         product={selectedProduct}
         onClose={() => setSelectedProduct(null)}
-        onCartUpdated={refreshCartBadge}
       />
 
       {/* Add New Product Modal */}
@@ -314,13 +272,6 @@ export default function ProductsView() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onProductAdded={loadProducts}
-      />
-
-      {/* Cart Modal */}
-      <CartModal
-        isOpen={isCartModalOpen}
-        onClose={() => setIsCartModalOpen(false)}
-        onCartUpdated={(cartData) => setCartCount(cartData.total_parts || 0)}
       />
     </div>
   )

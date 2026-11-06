@@ -1,4 +1,6 @@
 import os
+import logging
+import time
 from dotenv import find_dotenv, load_dotenv
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,11 +22,28 @@ from app.api.product_routes import router as product_router
 from app.api.package_routes import router as package_router
 from app.api.cart_routes import router as cart_router
 
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="3D Packing Optimizer API",
     description="Agentic 3D Packing Optimizer: Part requirement parsing, custom box sizing, padding calculation, and 3D spatial packing optimization.",
     version="1.0.0",
 )
+
+
+@app.middleware("http")
+async def log_request_duration(request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("http.request.failed method=%s path=%s duration_ms=%.2f", request.method, request.url.path, (time.perf_counter() - started) * 1000)
+        raise
+    logger.info("http.request.completed method=%s path=%s status=%s duration_ms=%.2f", request.method, request.url.path, response.status_code, (time.perf_counter() - started) * 1000)
+    return response
 
 # Enable CORS for frontend applications (e.g. Vite on localhost:5173)
 app.add_middleware(

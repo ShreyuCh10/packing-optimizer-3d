@@ -85,6 +85,7 @@ export interface UtilizationMetrics {
 
 export interface PlacedItem {
   item_id?: string
+  name?: string
   item_name?: string
   item_index?: number
   position?: { x: number; y: number; z: number }
@@ -180,10 +181,48 @@ export interface ContainerPackingEvaluation {
 
 export interface WorkflowResult {
   status: string
+  action?: 'conversation' | 'confirm_product' | 'optimized' | string
+  conversation_id?: string
   stage: 'requirement_gathering' | 'hitl' | 'retrieval_gathering' | 'packing_optimization' | string
   summary: string
+  task_manifest?: Array<Record<string, any>>
+  draft_items?: Array<Record<string, any>>
+  extraction_method?: string
   hitl_required: boolean
   hitl_reason?: string | null
+  confirmation_required?: boolean
+  matched_product?: {
+    id: number
+    part_name: string
+    part_length: number
+    part_breadth: number
+    part_height: number
+    part_weight: number
+    part_type?: string
+    standard_no_of_parts?: number
+    [key: string]: any
+  }
+  matched_products?: Array<{
+    product_id: number
+    part_name: string
+    part_length: number
+    part_width: number
+    part_height: number
+    part_weight: number
+    quantity: number
+    part_type?: string
+    [key: string]: any
+  }>
+  other_candidates?: any[]
+  requested_quantity?: number
+  product_not_found?: boolean
+  available_products_sample?: Array<{
+    id: number
+    part_name: string
+    part_type?: string
+    standard_no_of_parts?: number
+    [key: string]: any
+  }>
   requirements?: PartRequirements
   metrics?: RetrievalMetrics
   candidate_packages?: CandidatePackage[]
@@ -208,5 +247,7 @@ export interface ChatMessage {
   text: string
   timestamp?: string
   workflowResult?: WorkflowResult
+  taskManifest?: Array<Record<string, any>>
+  workflowStatus?: string
   isError?: boolean
 }

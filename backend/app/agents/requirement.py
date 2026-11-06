@@ -1,4 +1,7 @@
-from typing import TypedDict, Literal, Optional, Dict, Any, Union, Tuple
+import json
+import logging
+import time
+from typing import TypedDict, Literal, Optional, Dict, Any, Union, Tuple, List
 import re
 
 from laya.integrations.langchain import LayaRouter
@@ -13,6 +16,8 @@ except Exception:
     get_product_by_id = None
     get_product_by_name = None
     get_all_products = None
+
+logger = logging.getLogger(__name__)
 
 # Alias for compatibility if referenced as MessagePromptTemplate
 MessagePromptTemplate = PromptTemplate
@@ -45,6 +50,7 @@ class Requirements(BaseModel):
 
 class RequirementState(TypedDict, total=False):
     requirement: str
+    check_catalog: bool
     fullfilled: bool
     fulfilled: bool
     requirements: Optional[Requirements]
@@ -61,7 +67,7 @@ REQUIREMENT_CRITERIA = {
 REQUIREMENT_INSTRUCTIONS = """Does this text contain explicit 3D dimensions (length, width, height or numeric dimensions like 140x90x60mm) to calculate packaging?"""
 
 
-def evaluate_with_laya_details(requirements_text: str) -> Dict[str, Any]:
+def evaluate_with_laya_details(requirements_text: str, check_catalog: bool = True) -> Dict[str, Any]:
     """Evaluate text completeness using physical geometry checks alongside LayaRouter, returning granular trace details."""
     text_lower = str(requirements_text or "").lower()
 
@@ -74,7 +80,7 @@ def evaluate_with_laya_details(requirements_text: str) -> Dict[str, Any]:
 
     # Also check if text matches a known product name in the database
     has_catalog_name = False
-    if get_all_products:
+    if check_catalog and get_all_products:
         try:
             for p in get_all_products():
                 pname = p.get("part_name", "").lower()
@@ -149,7 +155,7 @@ def parse_requirements(
         return _evaluate_with_laya_or_fallback(requirements)
 
     text = requirements.get("requirement", "")
-    details = evaluate_with_laya_details(text)
+    details = evaluate_with_laya_details(text, check_catalog=requirements.get("check_catalog", True))
     is_fulfilled = details["is_fulfilled"]
 
     return {
@@ -226,10 +232,10 @@ def _match_catalog_product(text: str) -> Optional[Tuple[Dict[str, Any], Optional
     return None
 
 
-def _fallback_extract(text: str) -> Requirements:
+def _fallback_extract(text: str, check_catalog: bool = True) -> Requirements:
     """Fallback extractor: checks SQLite catalog first, then deterministic regex extraction."""
     # 0. Check SQLite catalog match first
-    catalog_match = _match_catalog_product(text)
+    catalog_match = _match_catalog_product(text) if check_catalog else None
     if catalog_match:
         prod, explicit_snp = catalog_match
         pid = prod.get("id")
@@ -300,6 +306,157 @@ def _fallback_extract(text: str) -> Requirements:
     )
 
 
+class GatheredItem(BaseModel):
+    """One item mentioned in the active packaging task; fields may arrive over several turns."""
+    name: Optional[str] = None
+    product_id: Optional[int] = None
+    catalog_reference: bool = Field(default=False, description="True when the user intends this to be a catalog product lookup")
+    quantity: Optional[int] = Field(default=None, ge=1)
+    part_length: Optional[float] = Field(default=None, gt=0)
+    part_width: Optional[float] = Field(default=None, gt=0)
+    part_height: Optional[float] = Field(default=None, gt=0)
+    part_weight: Optional[float] = Field(default=None, gt=0)
+    part_type: Optional[str] = None
+    description: Optional[str] = None
+
+
+class RequirementTurnExtraction(BaseModel):
+    """Structured outcome of one conversational requirement-gathering turn."""
+    items: List[GatheredItem] = Field(default_factory=list)
+    assistant_message: str = Field(description="A concise natural follow-up or acknowledgment for the user")
+
+
+def _explicit_catalog_items(message: str) -> List[GatheredItem]:
+    # Common typing errors include "prouduct" and transposed "proudct".
+    refs = list(re.finditer(r"\bpr(?:o|ou)(?:d?u?ct|udct)\s*(?:id)?\s*[:#]?\s*(\d+)\b", message, re.IGNORECASE))
+    items: List[GatheredItem] = []
+    for index, ref in enumerate(refs):
+        product_id = int(ref.group(1))
+        previous_end = refs[index - 1].end() if index else 0
+        next_start = refs[index + 1].start() if index + 1 < len(refs) else len(message)
+        before = message[previous_end:ref.start()]
+        after = message[ref.end():next_start]
+        quantity_match = re.search(
+            r"(\d+)\s*(?:units?|pieces?|parts?|items?)?\s*(?:of|for)?\s*$",
+            before,
+            re.IGNORECASE,
+        )
+        if not quantity_match:
+            quantity_match = re.match(r"\s*(?:x|\u00d7|:)?\s*(\d+)\b", after, re.IGNORECASE)
+        product = get_product_by_id(product_id) if get_product_by_id else None
+        items.append(GatheredItem(
+            name=product.get("part_name") if product else f"Product {product_id}",
+            product_id=product_id,
+            catalog_reference=True,
+            quantity=int(quantity_match.group(1)) if quantity_match else None,
+        ))
+    return items
+
+
+def _fallback_requirement_turn(
+    message: str,
+    draft_items: List[Dict[str, Any]],
+) -> RequirementTurnExtraction:
+    """Conservative extraction fallback used only when the configured LLM call fails."""
+    explicit_items = _explicit_catalog_items(message)
+    if explicit_items:
+        return RequirementTurnExtraction(
+            items=explicit_items,
+            assistant_message="I found product references. I’ll check each one in the catalog and show you the matches to confirm.",
+        )
+
+    return RequirementTurnExtraction(
+        items=[],
+        assistant_message="Which product name or product ID from the catalog would you like to pack?",
+    )
+
+
+def gather_requirements_turn(
+    message: str,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    accumulated_manifest: Optional[List[Dict[str, Any]]] = None,
+    draft_items: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Call the LLM on every gathering turn and return updated active item drafts."""
+    history_text = "\n".join(
+        f"{turn.get('role', 'user')}: {turn.get('content', '')}"
+        for turn in (conversation_history or [])[-12:]
+    )
+    prompt = (
+        "You are a conversational assistant that gathers catalog product choices for a packaging task. Analyze the newest "
+        "message together with prior conversation and the confirmed manifest. Return every newly mentioned catalog product "
+        "with its quantity. Never repeat or alter committed manifest items. Never invent product IDs, quantities, or facts. "
+        "Set catalog_reference=true only when the user intends a specific product from the database (by product ID, SKU, "
+        "or unambiguous catalog name). Generic discussion, custom products, dimensions, and ordinary conversation are not "
+        "optimization items; respond conversationally and ask which database product they mean when appropriate. "
+        "When a catalog item is identified, say it will be checked and shown for confirmation.\n\n"
+        f"Committed manifest (read only): {json.dumps(accumulated_manifest or [], ensure_ascii=False)}\n"
+        f"Active draft items: {json.dumps(draft_items or [], ensure_ascii=False)}\n"
+        f"Recent conversation:\n{history_text}\n"
+        f"Newest user message: {message}\n"
+        "Return the updated active/new items only and one concise assistant reply."
+    )
+    try:
+        started = time.perf_counter()
+        logger.info("llm.call.started operation=requirement_extraction")
+        extractor = llm.with_structured_output(RequirementTurnExtraction)
+        extracted = extractor.invoke(prompt)
+        logger.info("llm.call.completed operation=requirement_extraction duration_ms=%.2f", (time.perf_counter() - started) * 1000)
+        if isinstance(extracted, dict):
+            extracted = RequirementTurnExtraction.model_validate(extracted)
+        explicit_items = _explicit_catalog_items(message)
+        if explicit_items:
+            extracted.items = [item for item in extracted.items if item.product_id is None] + explicit_items
+        if not extracted.assistant_message.strip():
+            extracted.assistant_message = "What else should I know about the part?"
+        return {
+            "items": [item.model_dump(exclude_none=True) for item in extracted.items],
+            "assistant_message": extracted.assistant_message,
+            "method": "Azure OpenAI Conversational Requirement Extractor",
+            "status": "llm_extracted",
+        }
+    except Exception:
+        logger.exception("llm.call.failed operation=requirement_extraction")
+        fallback = _fallback_requirement_turn(message, draft_items or [])
+        return {
+            "items": [item.model_dump(exclude_none=True) for item in fallback.items],
+            "assistant_message": fallback.assistant_message,
+            "method": "Conservative Deterministic Fallback",
+            "status": "llm_unavailable_fallback",
+        }
+
+
+def generate_conversation_prompt(
+    purpose: str,
+    manifest: Optional[List[Dict[str, Any]]] = None,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    """Ask the configured LLM to phrase a short next-step question for the user."""
+    fallback = {
+        "ask_add_more": "Would you like to add another product or part to this optimization task?",
+        "ask_next_item": "What product or part would you like to add next?",
+    }.get(purpose, "What would you like to do next?")
+    prompt = (
+        "Write one brief, natural chatbot message for a packaging workflow. Do not invent facts or requirements. "
+        f"The required conversational action is: {purpose}. The confirmed task manifest is "
+        f"{json.dumps(manifest or [], ensure_ascii=False)}. Recent conversation: "
+        f"{json.dumps((conversation_history or [])[-8:], ensure_ascii=False)}. Return only the message."
+    )
+    try:
+        started = time.perf_counter()
+        logger.info("llm.call.started operation=conversation_prompt purpose=%s", purpose)
+        response = llm.invoke(prompt)
+        logger.info("llm.call.completed operation=conversation_prompt purpose=%s duration_ms=%.2f", purpose, (time.perf_counter() - started) * 1000)
+        content = getattr(response, "content", response)
+        if isinstance(content, list):
+            content = " ".join(str(part.get("text", "")) if isinstance(part, dict) else str(part) for part in content)
+        message = str(content).strip().strip('"')
+        return message or fallback
+    except Exception:
+        logger.exception("llm.call.failed operation=conversation_prompt purpose=%s", purpose)
+        return fallback
+
+
 def extract_requirements(
     requirements: Union[RequirementState, str]
 ) -> Union[Requirements, Dict[str, Any]]:
@@ -310,11 +467,13 @@ def extract_requirements(
     """
     if isinstance(requirements, str):
         req_text = requirements
+        check_catalog = True
     else:
         req_text = requirements.get("requirement", "")
+        check_catalog = requirements.get("check_catalog", True)
 
     # 1. Priority A: Check if input references a catalog product from SQLite database
-    catalog_match = _match_catalog_product(req_text)
+    catalog_match = _match_catalog_product(req_text) if check_catalog else None
     if catalog_match:
         prod, explicit_snp = catalog_match
         pid = prod.get("id")
@@ -346,7 +505,7 @@ def extract_requirements(
             llm_with_structured_output = llm.with_structured_output(Requirements)
             res = llm_with_structured_output.invoke(prompt.format(requirements=req_text))
         except Exception:
-            res = _fallback_extract(req_text)
+            res = _fallback_extract(req_text, check_catalog=check_catalog)
             extraction_method = "Deterministic Regex Extractor"
             extraction_status = "fallback_rules (LLM credentials placeholder)"
 

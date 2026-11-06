@@ -7,14 +7,23 @@ import PlacedPartsManifest from './PlacedPartsManifest'
 interface WorkflowMessageCardProps {
   result: WorkflowResult
   onApplyPrompt?: (promptText: string) => void
+  onConfirmProduct?: (product: any, quantity: number) => void
 }
 
 export default function WorkflowMessageCard({
   result,
   onApplyPrompt,
+  onConfirmProduct,
 }: WorkflowMessageCardProps) {
   const [activeTab, setActiveTab] = useState<'3d' | 'candidates' | 'specs'>('3d')
   const [selectedContainerName, setSelectedContainerName] = useState<string | null>(null)
+  const [confirmQuantity, setConfirmQuantity] = useState<number>(
+    result.requested_quantity || result.matched_product?.standard_no_of_parts || 1
+  )
+  const [activeMatchedProduct, setActiveMatchedProduct] = useState<any>(
+    result.matched_product || null
+  )
+  const matchedProducts = result.matched_products ?? []
 
   const req = result.requirements ?? {}
   const metrics = result.metrics ?? {}
@@ -67,6 +76,7 @@ export default function WorkflowMessageCard({
     : util
 
   const activePlacedItems = activeEval?.placed_items || result.placed_items
+  const activeUnplacedItems = activeEval?.unplaced_items || result.unplaced_items
   const activeOrientationsBreakdown = activeEval?.orientations_breakdown || result.orientations_breakdown
   const activeBestOrientation = activeEval?.best_orientation || result.best_orientation
   const isHitl = result.hitl_required
@@ -79,12 +89,17 @@ export default function WorkflowMessageCard({
   const productMeshUrl = productMeshIdentifier
     ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/products/${encodeURIComponent(String(productMeshIdentifier))}/mesh`
     : undefined
+  const taskProducts = result.task_manifest?.length
+    ? result.task_manifest
+    : req.product_id
+      ? [{ product_id: req.product_id, part_name: partName, quantity: Number(snp) || 1 }]
+      : []
 
   return (
     <div className="w-full space-y-3.5">
 
-      {/* 3. Human-In-The-Loop Clarification Banner (if HITL required) */}
-      {isHitl && (
+      {/* 3. Human-In-The-Loop Clarification Banner (if HITL required and not product_not_found) */}
+      {isHitl && !result.product_not_found && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-2xs">
           <div className="flex items-start gap-3">
             <div className="w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 font-bold text-sm shadow-xs">
@@ -92,11 +107,11 @@ export default function WorkflowMessageCard({
             </div>
             <div className="flex-1">
               <h4 className="text-sm font-semibold text-amber-900">
-                Action Required: Incomplete Part Specifications
+                Tell me a little more about the part
               </h4>
               <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                {result.hitl_reason ||
-                  'The Requirement Gathering Agent requires additional physical details to query the database and pack.'}
+                {result.summary || result.hitl_reason ||
+                  'Share the part dimensions, unit weight, and quantity so I can work out a package.'}
               </p>
 
               {/* Quick Prompt Suggestion Chips for User Convenience */}
@@ -145,11 +160,272 @@ export default function WorkflowMessageCard({
         </div>
       )}
 
+      {/* 2.5 Product Confirmation Dialogue */}
+      {result.confirmation_required && matchedProducts.length > 0 && (
+        <div className="bg-sky-50/60 border-2 border-sky-300 rounded-2xl p-5 shadow-sm">
+          <h3 className="text-base font-bold text-slate-900">Please confirm this packing list</h3>
+          <p className="text-xs text-slate-600 mt-1">I found these products in the catalog. Check the quantities, then confirm to start packing optimization.</p>
+          <div className="mt-3 space-y-2">
+            {matchedProducts.map((product, index) => (
+              <div key={`${product.product_id}-${index}`} className="bg-white border border-sky-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{product.part_name}</div>
+                  <div className="text-xs text-slate-500">Product ID #{product.product_id} · {product.part_length} × {product.part_width} × {product.part_height} mm · {product.part_weight} kg each</div>
+                </div>
+                <div className="text-sm font-semibold text-sky-800">Quantity: {product.quantity}</div>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => onConfirmProduct?.(matchedProducts, result.requested_quantity ?? matchedProducts.reduce((total, product) => total + product.quantity, 0))}
+            className="mt-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-xs transition-all cursor-pointer"
+          >
+            Confirm list & optimize package
+          </button>
+        </div>
+      )}
+      {result.confirmation_required && matchedProducts.length === 0 && activeMatchedProduct && (
+        <div className="bg-sky-50/60 border-2 border-sky-300 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-start gap-3.5">
+            <div className="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
+                  Database Catalog Match
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  Product ID #{activeMatchedProduct.id}
+                </span>
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mt-1">
+                Is this the product you want to pack?
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                The optimization agent validated your prompt against our SQLite database. Please confirm the product and quantity to proceed with 3D packing.
+              </p>
+
+              {/* Matched Product Specs Card */}
+              <div className="mt-3.5 bg-white border border-sky-200 rounded-xl p-3.5 shadow-2xs">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      {activeMatchedProduct.part_name}
+                    </h4>
+                    <span className="text-xs text-sky-700 font-medium">
+                      {activeMatchedProduct.part_type || 'Standard Part'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-medium bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                    SNP: {activeMatchedProduct.standard_no_of_parts || 1}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-100 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Dimensions</span>
+                    <span className="font-semibold text-slate-800">
+                      {activeMatchedProduct.part_length} × {activeMatchedProduct.part_breadth || activeMatchedProduct.part_width} × {activeMatchedProduct.part_height} mm
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Unit Weight</span>
+                    <span className="font-semibold text-slate-800">
+                      {activeMatchedProduct.part_weight} kg
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Total Est. Weight</span>
+                    <span className="font-semibold text-slate-800">
+                      {(confirmQuantity * (activeMatchedProduct.part_weight || 0.1)).toFixed(2)} kg
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-semibold">Feed Method</span>
+                    <span className="font-semibold text-slate-800 truncate block">
+                      {activeMatchedProduct.line_feeding_method || 'Two-Bin'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Other candidate options if user meant something else */}
+              {result.other_candidates && result.other_candidates.length > 0 && (
+                <div className="mt-3">
+                  <span className="text-[11px] font-medium text-slate-500 block mb-1">
+                    Or did you mean:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.other_candidates.map((cand) => (
+                      <button
+                        key={cand.id}
+                        type="button"
+                        onClick={() => setActiveMatchedProduct(cand)}
+                        className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors cursor-pointer ${
+                          activeMatchedProduct.id === cand.id
+                            ? 'bg-sky-600 text-white border-sky-600'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {cand.part_name} (ID #{cand.id})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Quantity Stepper and Confirm Button */}
+              <div className="mt-4 pt-3.5 border-t border-sky-200/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700">Quantity to Pack:</span>
+                  <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmQuantity((prev) => Math.max(1, prev - 1))}
+                      disabled={confirmQuantity <= 1}
+                      className="px-2.5 py-1 text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      value={confirmQuantity}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10)
+                        if (!isNaN(val) && val >= 1) setConfirmQuantity(val)
+                      }}
+                      className="w-12 text-center text-xs font-semibold text-slate-800 border-x border-slate-200 py-1 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setConfirmQuantity((prev) => prev + 1)}
+                      className="px-2.5 py-1 text-slate-600 hover:bg-slate-100 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onConfirmProduct) {
+                        onConfirmProduct(activeMatchedProduct, confirmQuantity)
+                      }
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                    </svg>
+                    <span>Yes, Confirm & Optimize Package</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2.6 Product Not Found Banner (Anti-Hallucination Guardrail) */}
+      {result.product_not_found && (
+        <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-5 shadow-2xs">
+          <div className="flex items-start gap-3.5">
+            <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 font-bold text-base shadow-xs">
+              ✕
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">
+                  Unverified Product Blocked
+                </span>
+                <span className="text-xs text-rose-600 font-medium">
+                  Catalog Strictness Enforced
+                </span>
+              </div>
+              <h4 className="text-base font-bold text-rose-950 mt-1">
+                Product Not Found in Database Catalog
+              </h4>
+              <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                The optimization agent strictly avoids reasoning about or optimizing for made-up products.
+                All packaging recommendations require verified CAD specifications and weight ratings from our SQLite catalog.
+              </p>
+
+              {result.available_products_sample && result.available_products_sample.length > 0 && onApplyPrompt && (
+                <div className="mt-4 pt-3 border-t border-rose-200/80">
+                  <div className="text-[11px] font-bold text-rose-900 uppercase tracking-wider mb-2">
+                    Select a verified catalog product to optimize:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {result.available_products_sample.map((prod) => (
+                      <button
+                        key={prod.id}
+                        type="button"
+                        onClick={() =>
+                          onApplyPrompt(
+                            `Pack ${prod.standard_no_of_parts || 4} units of ${prod.part_name}`
+                          )
+                        }
+                        className="text-xs bg-white text-slate-800 hover:text-rose-950 border border-rose-300 hover:border-rose-400 hover:bg-rose-100/50 px-3 py-1.5 rounded-lg font-medium transition-colors shadow-2xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span>{prod.part_name}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">#{prod.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 3.5 Major Heading: Granular Agent Tool Use Trace */}
       <ToolExecutionTrace steps={result.steps} />
 
-      {/* 4. Multi-Agent Process Results (Only shown when not blocked by HITL) */}
-      {!isHitl && (
+      {taskProducts.length > 0 && result.action === 'optimized' && (
+        <section className="rounded-xl border-2 border-sky-200 bg-sky-50/70 p-4 shadow-2xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Products in this packing result</h3>
+              <p className="mt-0.5 text-xs text-slate-600">Catalog products and quantities sent to the 3D placement optimizer.</p>
+            </div>
+            <span className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs font-semibold text-sky-800">
+              {taskProducts.reduce((total, product) => total + (Number(product.quantity ?? product.snp) || 1), 0)} units requested
+            </span>
+          </div>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {taskProducts.map((product, index) => {
+              const productName = String(product.part_name ?? product.name ?? 'Catalog product')
+              const placedCount = (activePlacedItems ?? []).filter((item) => (item.name ?? item.item_name) === productName).length
+              const unplacedCount = (activeUnplacedItems ?? []).filter((item) => (item.name ?? item.item_name) === productName).length
+              return (
+                <li key={`${product.product_id ?? productName}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-sky-100 bg-white px-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-900">{productName}</div>
+                    <div className="text-[11px] text-slate-500">{product.product_id != null ? `Product ID #${product.product_id}` : 'Catalog product'}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-xs font-bold text-slate-800">{placedCount} / {Number(product.quantity ?? product.snp) || 1} placed</div>
+                    {unplacedCount > 0 && <div className="text-[10px] font-medium text-amber-700">{unplacedCount} unplaced</div>}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* 4. Multi-Agent Process Results (Only shown when confirmed and not blocked by HITL) */}
+      {!isHitl && !result.confirmation_required && !result.product_not_found && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
           {/* Tabs Navigation Header */}
           <div className="border-b border-slate-200 bg-slate-50/70 px-3 py-2 flex items-center justify-between gap-2">

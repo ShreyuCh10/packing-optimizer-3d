@@ -159,6 +159,8 @@ def resolve_requirements_from_db(
     auto-populate dimensions, weight, SNP, and material from the SQLite 'products' table.
     """
     resolved = dict(data)
+    if resolved.get("catalog_lookup") is False:
+        return resolved
     product_id = resolved.get("product_id")
     part_name = resolved.get("name") or resolved.get("part_name")
 
@@ -221,6 +223,62 @@ def calculate_metrics(
 
     # Auto-resolve from database if product_id or part_name is provided
     data = resolve_requirements_from_db(raw_data, db_path=db_path)
+
+    # Check for multi-item cart manifest
+    if data.get("items") and isinstance(data["items"], list) and len(data["items"]) > 0:
+        total_vol = 0.0
+        total_wt = 0.0
+        max_l, max_w, max_h = 0.0, 0.0, 0.0
+        total_qty = 0
+        resolved_items = []
+        for it in data["items"]:
+            rit = resolve_requirements_from_db(it, db_path=db_path)
+            l = float(rit.get("part_length") or rit.get("length") or 100.0)
+            w = float(rit.get("part_width") or rit.get("part_breadth") or rit.get("width") or 80.0)
+            h = float(rit.get("part_height") or rit.get("height") or 50.0)
+            wt = float(rit.get("part_weight") or rit.get("weight") or 1.0)
+            qty = max(1, int(rit.get("quantity") or rit.get("number_of_parts") or rit.get("snp") or 1))
+            total_vol += (l * w * h / 1000000.0) * qty
+            total_wt += wt * qty
+            max_l = max(max_l, l)
+            max_w = max(max_w, w)
+            max_h = max(max_h, h)
+            total_qty += qty
+            rit["length"] = l
+            rit["width"] = w
+            rit["height"] = h
+            rit["weight"] = wt
+            rit["quantity"] = qty
+            resolved_items.append(rit)
+
+        padding_thickness = 15.0
+        padding_material = "polyethylene_foam"
+        fragility = "medium"
+        eff_l = round(max_l + (2 * padding_thickness), 2)
+        eff_w = round(max_w + (2 * padding_thickness), 2)
+        eff_h = round(max_h + (2 * padding_thickness), 2)
+        vol_req = round(max(total_vol * 1.25, (eff_l * eff_w * eff_h) / 1000000.0), 4)
+
+        return {
+            "part_name": data.get("name") or data.get("part_name") or f"Cart Manifest ({total_qty} units)",
+            "matched_product_id": None,
+            "part_type": "Mixed Manifest",
+            "snp": total_qty,
+            "max_rating": round(total_wt, 3),
+            "single_product_dimensions_mm": {"length": max_l, "width": max_w, "height": max_h},
+            "single_product_volume_cm3": round(max_l * max_w * max_h / 1000.0, 3),
+            "single_product_volume_liters": round(max_l * max_w * max_h / 1000000.0, 4),
+            "total_product_volume_liters": round(total_vol, 4),
+            "total_product_weight_kg": round(total_wt, 3),
+            "fragility": fragility,
+            "recommended_padding_material": padding_material,
+            "recommended_padding_thickness_mm": padding_thickness,
+            "padding_volume_liters": round(max(0.0, vol_req - total_vol), 4),
+            "multi_unit_layout": {"quantity": total_qty, "items_count": len(resolved_items)},
+            "effective_bounding_box_mm": {"length": eff_l, "width": eff_w, "height": eff_h},
+            "total_volume_required_liters": vol_req,
+            "items": resolved_items,
+        }
 
     # Extract dimensions with fallbacks
     length = float(data.get("part_length") or data.get("length") or 100.0)
