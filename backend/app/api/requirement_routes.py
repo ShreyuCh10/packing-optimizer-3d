@@ -128,6 +128,21 @@ def retrieve_packages(input_data: RetrievalInput):
         raise HTTPException(status_code=500, detail=f"Retrieval agent failed: {str(e)}")
 
 
+class OKFDecisionInput(BaseModel):
+    user_query: str = Field(..., min_length=1, description="Question to answer from the local OKF packaging knowledge documents")
+
+
+@router.post("/okf/decide", summary="Make an evidence-based decision from OKF packaging guidance")
+def decide_from_okf(input_data: OKFDecisionInput):
+    """Run the bounded LangGraph workflow over local OKF Markdown sources."""
+    from app.agents.okf_workflow import run_okf_decision
+    try:
+        return run_okf_decision(input_data.user_query.strip())
+    except Exception as exc:
+        logger.exception("api.okf_decision.failed")
+        raise HTTPException(status_code=500, detail=f"OKF decision workflow failed: {exc}")
+
+
 def _run_chat_turn(input_data: Dict[str, Any], on_stage=None, owner_id: str = "local") -> Dict[str, Any]:
     from app.agents.conversation_workflow import process_chat_turn
     user_in = input_data.get("user_input", input_data)
