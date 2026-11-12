@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+*.db
 backend/outputs/.venv/
 __pycache__/
 *.pyc
